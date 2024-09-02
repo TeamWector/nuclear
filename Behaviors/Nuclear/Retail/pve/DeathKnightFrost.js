@@ -33,12 +33,16 @@ export class DeathKnightFrostBehavior extends Behavior {
         common.waitForCastOrChannel(),
         common.waitForFacing(),
         spell.interrupt("Mind Freeze"),
-        spell.cast("Auto Attack", on => me.target, ret => me.spellInfo.autoAttackTarget.isNull),
         spell.cast("Death Strike", ret => me.pctHealth < 95 && me.hasAura(auras.darkSuccor)),
         spell.cast("Death Strike", ret => me.pctHealth < 65 && me.power > 35),
         spell.cast("Frost Strike", ret => this.checkFrostStrikeKeepUpBuffs()),
-        spell.cast("Pillar of Frost", on => me, ret => me.targetUnit && me.isWithinMeleeRange(me.targetUnit)),
-        spell.cast("Abomination Limb", on => me, ret => me.targetUnit && me.isWithinMeleeRange(me.targetUnit)),
+        new bt.Decorator(
+          req => this.wantCooldowns(),
+          new bt.Selector(
+            spell.cast("Pillar of Frost", on => me, ret => me.targetUnit && me.isWithinMeleeRange(me.targetUnit)),
+            spell.cast("Abomination Limb", on => me, ret => me.targetUnit && me.isWithinMeleeRange(me.targetUnit)),
+          )
+        ),
         spell.cast("Remorseless Winter", on => me, ret => me.targetUnit && me.isWithinMeleeRange(me.targetUnit)),
         this.multiTargetRotation(),
         spell.cast("Rune Strike", ret => me.hasAura(auras.killingMachine)),
@@ -53,6 +57,10 @@ export class DeathKnightFrostBehavior extends Behavior {
         spell.cast("Horn of Winter", ret => me.targetUnit && me.power < 70),
       )
     );
+  }
+
+  wantCooldowns() {
+    return me.isWithinMeleeRange(me.target) && me.target && me.target.timeToDeath() !== 9999 && me.target.timeToDeath() > 10;
   }
 
   multiTargetRotation() {

@@ -40,7 +40,6 @@ class Common {
   static waitForNotSitting() {
     return new bt.Action(() => {
       if (me.isSitting()) {
-        console.info('imsitting')
         return bt.Status.Success;
       }
       return bt.Status.Failure;

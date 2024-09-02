@@ -55,7 +55,7 @@ export class WarriorFuryBehavior extends Behavior {
   }
 
   wantCooldowns() {
-    return this.isEnraged() && me.isWithinMeleeRange(me.target) && me.target && me.target.timeToDeath() != 9999 && me.target.timeToDeath() > 10;
+    return this.isEnraged() && me.isWithinMeleeRange(me.target) && me.target && me.target.timeToDeath() !== 9999 && me.target.timeToDeath() > 10;
   }
 
   isEnraged() {
