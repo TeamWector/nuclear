@@ -16,7 +16,7 @@ const auras = {
 export class DeathKnightBloodBehavior extends Behavior {
   context = BehaviorContext.Any;
   specialization = Specialization.DeathKnight.Blood;
-  name = "Blood Deekay"
+  name = "Deathknight [Blood]"
 
   build() {
     return new bt.Selector(

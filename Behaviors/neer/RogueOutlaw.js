@@ -17,7 +17,7 @@ const auras = {
 }
 
 export class RogueOutlawBehavior extends Behavior {
-  name = "Outlaw Rogue";
+  name = "Rogue [Outlaw]";
   context = BehaviorContext.Any;
   specialization = Specialization.Rogue.Combat;
   static settings = [

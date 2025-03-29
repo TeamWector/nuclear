@@ -15,6 +15,7 @@ const auras = {
 export class DruidGuardianBehavior extends Behavior {
   context = BehaviorContext.Any;
   specialization = Specialization.Druid.Guardian;
+  name = "Druid [Guardian]"
 
   build() {
     return new bt.Selector(

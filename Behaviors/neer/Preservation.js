@@ -21,7 +21,7 @@ const auras = {
 };
 
 export class EvokerPreservationBehavior extends Behavior {
-  name = "Preservation Evoker";
+  name = "Evoker [Preservation]";
   context = BehaviorContext.Any;
   specialization = Specialization.Evoker.Preservation;
   static settings = [

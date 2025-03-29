@@ -16,7 +16,7 @@ const auras = {
 };
 
 export class FrostMageBehavior extends Behavior {
-  name = "Frost Mageeer";
+  name = "Mage [Frost]";
   context = BehaviorContext.Any;
   specialization = Specialization.Mage.Frost;
 

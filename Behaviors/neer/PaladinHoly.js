@@ -21,7 +21,7 @@ const auras = {
 };
 
 export class PaladinHolyBehavior extends Behavior {
-  name = "Holy Paladin";
+  name = "Paladin [Holy]";
   context = BehaviorContext.Any;
   specialization = Specialization.Paladin.Holy;
   static settings = [

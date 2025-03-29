@@ -10,7 +10,7 @@ import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 export class MageFireBehavior extends Behavior {
   context = BehaviorContext.Any;
   specialization = Specialization.Mage.Fire;
-  name = "Basic Ass Fire"
+  name = "Mage [Fire]"
 
   build() {
     return new bt.Decorator(

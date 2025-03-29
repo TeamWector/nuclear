@@ -10,7 +10,7 @@ import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 export class MageArcaneBehavior extends Behavior {
   context = BehaviorContext.Any;
   specialization = Specialization.Mage.Arcane;
-  name = "Basic Ass Arcane";
+  name = "Mage [Arcane]";
 
   build() {
     return new bt.Selector(

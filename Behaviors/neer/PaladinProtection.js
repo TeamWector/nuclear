@@ -20,7 +20,7 @@ const auras = {
 }
 
 export class PaladinProtectionBehavior extends Behavior {
-  name = "Protection Paladin";
+  name = "Paladin [Protection]";
   context = BehaviorContext.Any;
   specialization = Specialization.Paladin.Protection;
   static settings = [

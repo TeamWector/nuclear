@@ -15,7 +15,7 @@ const auras = {
 }
 
 export class ShamanElementalBehavior extends Behavior {
-  name = "Shaman Elemental"
+  name = "Shaman [Elemental]"
   context = BehaviorContext.Any;
   specialization = Specialization.Shaman.Elemental;
 

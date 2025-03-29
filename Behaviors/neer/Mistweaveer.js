@@ -23,7 +23,7 @@ const auras = {
 }
 
 export class MonkMistweaverBehavior extends Behavior {
-  name = "Mistweaveer";
+  name = "Monk [Mistweaver]";
   context = BehaviorContext.Any;
   specialization = Specialization.Monk.Mistweaver;
 

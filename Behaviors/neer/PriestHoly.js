@@ -17,7 +17,7 @@ const auras = {
 };
 
 export class PriestHolyBehavior extends Behavior {
-  name = "Holy Priest";
+  name = "Priest [Holy]";
   context = BehaviorContext.Any;
   specialization = Specialization.Priest.Holy;
   static settings = [

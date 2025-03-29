@@ -18,7 +18,7 @@ const auras = {
 }
 
 export class HunterBeastMasteryBehavior extends Behavior {
-  name = "Beast Mastery Hunter";
+  name = "Hunter [BM]";
   context = BehaviorContext.Any;
   specialization = Specialization.Hunter.BeastMastery;
   static settings = [

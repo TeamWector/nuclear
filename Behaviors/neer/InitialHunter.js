@@ -8,7 +8,7 @@ import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 import Pet from "@/Core/Pet";
 
 export class HunterInitialBehavior extends Behavior {
-  name = "Initial Hunter";
+  name = "Hunter [Initial]";
   context = BehaviorContext.Any;
   specialization = Specialization.Hunter.Initial;
   static settings = [
