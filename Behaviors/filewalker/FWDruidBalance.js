@@ -42,19 +42,25 @@ export class BalanceDruidBehavior extends Behavior {
       common.waitForFacing(),
       common.waitForCastOrChannel(),
 
-      
+      new bt.Decorator(
+        req => !me.hasAura(24858),
+        spell.cast("Moonkin Form"),
+
+          new bt.Action(() => bt.Status.Success)
+      ),
       
       new bt.Decorator(
       ret => !spell.isGlobalCooldown(),
       new bt.Selector(
         spell.interrupt('Solar Beam'),
         this.preCombatCooldowns(),
+       
 
-        // new bt.Decorator(
-        //   req => this.enemiesAroundTarget(5) >= 2,
-        //   this.multiTarget(),
-        //     new bt.Action(() => bt.Status.Success)
-        // ),
+        new bt.Decorator(
+          req => this.enemiesAroundTarget(5) >= 2,
+          this.multiTarget(),
+            new bt.Action(() => bt.Status.Success)
+        ),
 
         new bt.Decorator(
           req => this.enemiesAroundTarget(5) <= 1,
@@ -189,25 +195,25 @@ export class BalanceDruidBehavior extends Behavior {
         this.convokeCondition()
       ),
       
-      // Moon cycle abilities
-      spell.cast('New Moon', this.getCurrentTarget, () => 
-        this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('New Moon') || 
-        spell.getCooldown('Celestial Alignment').timeleft > 15000
-      ),
+      // // Moon cycle abilities
+      // spell.cast('New Moon', this.getCurrentTarget, () => 
+      //   this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('New Moon') || 
+      //   spell.getCooldown('Celestial Alignment').timeleft > 15000
+      // ),
       
-      spell.cast('Half Moon', this.getCurrentTarget, () => 
-        this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('Half Moon') && 
-        (this.lunarRemains() > spell.getSpell('Half Moon').castTime || 
-         this.solarRemains() > spell.getSpell('Half Moon').castTime) || 
-        spell.getCooldown('Celestial Alignment').timeleft > 15000
-      ),
+      // spell.cast('Half Moon', this.getCurrentTarget, () => 
+      //   this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('Half Moon') && 
+      //   (this.lunarRemains() > spell.getSpell('Half Moon').castTime || 
+      //    this.solarRemains() > spell.getSpell('Half Moon').castTime) || 
+      //   spell.getCooldown('Celestial Alignment').timeleft > 15000
+      // ),
       
-      spell.cast('Full Moon', this.getCurrentTarget, () => 
-        this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('Full Moon') && 
-        (this.lunarRemains() > spell.getSpell('Full Moon').castTime || 
-         this.solarRemains() > spell.getSpell('Full Moon').castTime) || 
-        spell.getCooldown('Celestial Alignment').timeleft > 15000
-      ),
+      // spell.cast('Full Moon', this.getCurrentTarget, () => 
+      //   this.astralPowerDeficit() > this.passiveAsp() + this.energizeAmount('Full Moon') && 
+      //   (this.lunarRemains() > spell.getSpell('Full Moon').castTime || 
+      //    this.solarRemains() > spell.getSpell('Full Moon').castTime) || 
+      //   spell.getCooldown('Celestial Alignment').timeleft > 15000
+      // ),
       
       // Special proc spell usage
       spell.cast('Starsurge', this.getCurrentTarget, () => 
@@ -248,6 +254,11 @@ export class BalanceDruidBehavior extends Behavior {
       spell.cast('Starfall', this.getCurrentTarget, () => 
         this.astralPowerDeficit() <= this.passiveAsp() + 6 || 
         me.hasAura("Touch the Cosmos")
+      ),
+
+      // actions.aoe+=/starfall,if=astral_power.deficit<=variable.passive_asp+6
+      spell.cast('Starfall', this.getCurrentTarget, () => 
+        me.powerByType(PowerType.LunarPower) > 45
       ),
       
       // Moonfire with refined logic
@@ -326,7 +337,7 @@ export class BalanceDruidBehavior extends Behavior {
       
       // Cooldowns
       this.preCombatCooldowns(),
-      this.Cooldowns(),
+      this.castCooldowns(),
       
       // Warrior of Elune with proper timing
       spell.cast('Warrior of Elune', () => 
