@@ -152,7 +152,7 @@ export class HunterBeastMasteryBehavior extends Behavior {
       spell.cast("Dire Beast", req => this.hasTalent("Shadow Hounds") || this.hasTalent("Dire Cleave")),
       spell.cast("Explosive Shot", req => this.hasTalent("Thundering Hooves")),
       spell.cast("Kill Command"),
-      spell.cast("Cobra Shot", req => me.getTimeTillMaxPower(PowerType.Focus) < 3 || me.getAuraStacks("Hogstrider") > 3),
+      spell.cast("Cobra Shot", req => me.powerByType(PowerType.Focus) > 40 || me.getAuraStacks("Hogstrider") > 3),
       spell.cast("Dire Beast"),
       spell.cast("Explosive Shot"),
       spell.cast("Bag of Tricks", req => !me.hasAura("Bestial Wrath")),
