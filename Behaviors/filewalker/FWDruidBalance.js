@@ -68,7 +68,7 @@ export class BalanceDruidBehavior extends Behavior {
         ),
 
         
-        //spell.cast('Wrath', this.getCurrentTarget),
+        spell.cast('Wrath', this.getCurrentTarget),
       ),
       ),
     );
@@ -283,7 +283,7 @@ new bt.Selector(
           targetCount > 6 || 
           (spell.getCooldown('Force of Nature').timeleft > 3000 && !me.hasAura('Harmony of the Grove'))) {
         if (spell.cast("Moonfire", () => moonTarget)) {
-          return bt.Status.Success;
+          return bt.Status.Failure;
         }
       }
     }
