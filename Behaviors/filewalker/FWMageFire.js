@@ -1,733 +1,644 @@
-import { Behavior, BehaviorContext } from '@/Core/Behavior';
+import { Behavior, BehaviorContext } from "@/Core/Behavior";
 import * as bt from '@/Core/BehaviorTree';
 import Specialization from '@/Enums/Specialization';
-import common from '@/Core/Common';
-import spell from '@/Core/Spell';
-import Settings from "@/Core/Settings";
-import CombatTimer from '@/Core/CombatTimer';
-import objMgr from "@/Core/ObjectManager";
-import { me } from '@/Core/ObjectManager';
-import { defaultCombatTargeting as combat } from '@/Targeting/CombatTargeting';
+import Common from '@/Core/Common';
+import Spell from "@/Core/Spell";
+import { me } from "@/Core/ObjectManager";
+import { PowerType } from "@/Enums/PowerType";
+import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 
-// Define auras and spell IDs
-const auras = {
-  // Core auras
-  combustion: 190319,
-  hotStreak: 48108,
-  heatingUp: 48107,
-  
-  // Talent-related auras
-  furyOfTheSunKing: 383883, // Fury of the Sun King proc
-  hyperthermia: 383874, // Secondary talent Hot Streak
-  phoenixFlames: 257541,
-  feelTheBurn: 157644, // Feel the Burn talent aura
-  flameAccelerant: 203285, // Flame Accelerant talent aura
-  sunKingsBlessing: 383882, // Sun King's Blessing talent aura
-  improvedScorch: 383605, // Improved Scorch debuff
-  frostfireEmpowerment: 383493, // Frostfire Empowerment
-  heatShimmer: 375091, // Heat Shimmer (for scorch procs)
-  
-  // Add Phoenix Reborn buff
-  phoenixReborn: 444214,  // Phoenix Reborn buff
-  phoenixRebornBurn: 444219,  // Phoenix Reborn burn effect
+// Spell IDs for Fire Mage spells
+const SPELLS = {
+  // Core abilities
+  COMBUSTION: 190319,
+  FIREBALL: 133,
+  FIRE_BLAST: 108853,
+  PYROBLAST: 11366,
+  SCORCH: 2948,
+  FLAMESTRIKE: 2120,
+  PHOENIX_FLAMES: 257541,
+  METEOR: 153561,
+  SHIFTING_POWER: 382440,
+  DRAGONS_BREATH: 31661,
+  ARCANE_INTELLECT: 1459,
+  MIRROR_IMAGE: 55342,
 
-  // External buffs
-  bloodlust: 2825,
-  timeWarp: 80353,
-  heroism: 32182,
+  // Hot streak system
+  HOT_STREAK: 48108,
+  HEATING_UP: 48107,
+  HYPERTHERMIA: 383860,
+  HYPTERTHERMIA_AURA: 383874,
   
-  // Consumables
-  potionOfColdClarity: 371033
+  // Frostfire talents and effects
+  FROSTFIRE_BOLT: 431044,
+  FROSTFIRE_MASTERY: 431038,
+  FROSTFIRE_EMPOWERMENT: 431176,
+  EXCESS_FROST: 438600,
+  
+  // Sunfury talents
+  SPELLFIRE_SPHERES: 448601,
+  GLORIOUS_INCANDESCENCE: 449394,
+  
+  // Other talents and effects
+  SUN_KINGS_BLESSING: 383886,
+  IMPROVED_SCORCH: 383604,
+  FIREFALL: 384033,
+  MARK_OF_THE_FIRELORD: 450325,
+  QUICKFLAME: 450807,
+  FLAME_PATCH: 205037,
+  FIRESTARTER: 205026,
+  IMPROVED_SCORCH_DEBUFF: 383604,
+  HEAT_SHIMMER: 457735
 };
 
-export class FireMageSunfuryBehavior extends Behavior {
-  name = 'Fire Mage Sunfury';
+/**
+ * Behavior implementation for Fire Mage
+ * Strictly follows SIMC APL rotation
+ */
+export class FireMageBehavior extends Behavior {
   context = BehaviorContext.Any;
   specialization = Specialization.Mage.Fire;
-  version = wow.GameVersion.Retail;
+  name = "FW Fire Mage";
+  version = 1;
 
-  static settings = [
-    {
-      header: "Rotation Settings",
-      options: [
-        { type: "checkbox", uid: "FireMageUseCombustion", text: "Use Combustion", default: true },
-        { type: "checkbox", uid: "FireMageUseTrinkets", text: "Use Trinkets", default: true },
-        { type: "checkbox", uid: "FireMageUseRacials", text: "Use Racial Abilities", default: true },
-        { type: "checkbox", uid: "FireMageFirestarterCombustion", text: "Use Combustion during Firestarter", default: true }
-      ]
-    },
-    {
-      header: "AoE Settings",
-      options: [
-        { type: "slider", uid: "FireMageHotStreakFlamestrike", text: "Hot Streak Flamestrike Target Count", min: 2, max: 10, default: 3 },
-        { type: "slider", uid: "FireMageHardCastFlamestrike", text: "Hard Cast Flamestrike Target Count", min: 2, max: 10, default: 5 },
-        { type: "slider", uid: "FireMageCombustionFlamestrike", text: "Combustion Flamestrike Target Count", min: 2, max: 10, default: 3 },
-        { type: "slider", uid: "FireMageSKBFlamestrike", text: "Fury of the Sun King Flamestrike Target Count", min: 2, max: 10, default: 3 }
-      ]
-    },
-    {
-      header: "Combustion Settings",
-      options: [
-        { type: "slider", uid: "FireMageCombustionShiftingPower", text: "Combustion Shifting Power Target Count", min: 1, max: 10, default: 5 },
-        { type: "slider", uid: "FireMageFireBlastPoolAmount", text: "Extra Fire Blast Pool Amount", min: 0, max: 1, default: 0 }
-      ]
-    }
-  ];
+  // Initialize variables from precombat APL
+  castRemainsTime = 0.3;
+  poolingTime = 1000;
+  ffCombustionFlamestrike = 4;
+  ffFillerFlamestrike = 4;
+  sfCombustionFlamestrike = 3;
+  sfFillerFlamestrike = 3;
+  combustionPrecastTime = 0;
 
   build() {
-    
     return new bt.Selector(
-      common.waitForNotMounted(),
-      common.waitForNotSitting(),
-      
-      // Interrupt enemy casts
-      spell.cast('Counterspell', () => combat.interruptTarget),
-      
-      // Target validation
-      new bt.Action(() => (this.getCurrentTarget() === null ? bt.Status.Success : bt.Status.Failure)),
-      common.waitForTarget(),
-      common.waitForFacing(),
-      common.waitForCastOrChannel(),
-      
-     
-      // Pre-combat buffs
-      new bt.Decorator(
-        () => !me.inCombat(),
-        new bt.Selector(
-          spell.cast('Arcane Intellect', () => me, () => !me.hasAura('Arcane Intellect')),
-          spell.cast('Mirror Image', () => me),
-          spell.cast('Pyroblast', this.getCurrentTarget, () => me.hasAura(auras.hotStreak))
-        )
-      ),
-      
-      // Combat rotation
-      new bt.Decorator(
-        () => !spell.isGlobalCooldown(),
-        new bt.Selector(
-          // Calculate time to combustion
-          this.calculateCombustionTiming(),
-          
-          // Use Shifting Power outside of combustion
-          this.useShiftingPower(),
-
-          // Combustion phase
-          new bt.Decorator(
-            () => this.shouldStartCombustion() || me.hasAura(auras.combustion),
-            this.combustionPhase(),
-            new bt.Action(() => bt.Status.Success)
-          )
-
-        )
-      ),
-      
-      // Single target standard sustained
-      new bt.Decorator(
-        req => this.getCurrentTarget(),
-        this.standardRotation(),
-        new bt.Action(() => bt.Status.Success)
-      ),
-      
-      // Auto attack fallback
-      spell.cast('Auto Attack', this.getCurrentTarget, req => true)
-
-      // Default actions if nothing else can be done
-      // spell.cast('Ice Nova', this.getCurrentTarget, () => !this.isScorchExecutePhase()),
-      // spell.cast('Scorch', this.getCurrentTarget)
+      Common.waitForNotMounted(),
+      Common.waitForCastOrChannel(),
+      // Precombat actions
+      this.precombat(),
+      // Check target validity
+      new bt.Action(() => {
+        if (this.getCurrentTarget() === null) {
+          return bt.Status.Success;
+        }
+        return bt.Status.Failure;
+      }),
+      // Main action list selector
+      new bt.Selector(
+        // actions=call_action_list,name=cds,if=!(buff.hot_streak.up&prev_gcd.1.scorch)
+        new bt.Decorator(
+          () => !(me.hasAura(48108) && this.lastGcdWas("Scorch")),
+          this.cooldowns(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+        // actions+=/run_action_list,name=ff_combustion,if=talent.frostfire_bolt&(cooldown.combustion.remains<=variable.combustion_precast_time|buff.combustion.react|buff.combustion.remains>5)
+        new bt.Decorator(
+          () => this.hasTalent(431044) && (
+            Spell.getCooldown("Combustion").timeleft <= this.combustionPrecastTime || 
+            me.hasAura(190319) || 
+            this.getAuraRemainingTime(190319) > 5
+          ),
+          this.ffCombustion(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+        // actions+=/run_action_list,name=sf_combustion,if=cooldown.combustion.remains<=variable.combustion_precast_time|buff.combustion.react|buff.combustion.remains>5
+        new bt.Decorator(
+          () => Spell.getCooldown("Combustion").ready,
+          this.sfCombustion(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+        // actions+=/run_action_list,name=ff_filler,if=talent.frostfire_bolt
+        new bt.Decorator(
+          () => this.hasTalent(431044),
+          this.ffFiller(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+        // actions+=/run_action_list,name=sf_filler
+        new bt.Decorator(
+          () => !Spell.getCooldown("Combustion").ready,
+          this.sfFiller(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+       
+      )
     );
   }
 
-  // Helper method to get the current primary target
-  getCurrentTarget() {
-    const targetPredicate = unit => unit && !unit.dead && !unit.deadOrGhost && me.canAttack(unit);
-    const target = me.targetUnit;
-    
-    if (target !== null && targetPredicate(target)) {
-      return target;
-    }
-    
-    return combat.targets.find(targetPredicate) || null;
-  }
-
-  // Calculate timing for combustion
-  calculateCombustionTiming() {
-    return new bt.Action(() => {
-      // Base combustion cooldown in milliseconds
-      const combustionCD = spell.getCooldown('Combustion');
-      let timeToCombustion = combustionCD.timeleft;
-      
-      // If Combustion is already available and not on cooldown, set time to 0
-      if (combustionCD.ready && !me.hasAura(auras.combustion)) {
-        // console.debug('Combustion is ready to use!');
-        this.timeToCombustion = 0;
-        return bt.Status.Failure; // Continue to next action
-      }
-      
-      // Account for Kindling talent cooldown reduction (if present)
-      if (this.hasTalent('Kindling')) {
-        timeToCombustion *= 0.9; // Simplified reduction estimate
-      }
-      
-      // Delay combustion if Firestarter is active and setting is false
-      if (this.isFirestarterActive() && !Settings.FireMageFirestarterCombustion) {
-        timeToCombustion = Math.max(timeToCombustion, this.getFirestarterRemains() * 1000); // Convert to ms
-      }
-      
-      // Delay for Sun King's Blessing during Firestarter
-      if (this.hasTalent('Sun King\'s Blessing') && this.isFirestarterActive() && !me.hasAura(auras.furyOfTheSunKing)) {
-        const missingStacks = 4 - (me.getAuraStacks(auras.sunKingsBlessing) || 0);
-        timeToCombustion = Math.max(timeToCombustion, missingStacks * 3 * 1500); // 3 GCDs × 1.5s in ms
-      }
-      
-      // // Don't delay if fight is about to end
-      // if (this.fightRemains() < 20000) { // 20 seconds in ms
-      //   timeToCombustion = Math.min(timeToCombustion, 0);
-      // }
-      
-      // Log the calculated time for debugging
-      // console.debug(`Time to Combustion: ${timeToCombustion/1000} seconds, CD: ${combustionCD.timeleft/1000}s, Ready: ${combustionCD.ready}`);
-      
-      // Store for use in other methods (in milliseconds)
-      this.timeToCombustion = timeToCombustion;
-      
-      return bt.Status.Failure; // Always continue to next action
-    });
-  }
-  
-
-  // Combustion phase rotation
-  combustionPhase() {
+  precombat() {
     return new bt.Selector(
-      // Combustion cooldowns (racials, trinkets, etc)
-      new bt.Decorator(
-        () => me.hasAura(auras.combustion) && Settings.FireMageUseCombustion,
-        this.combustionCooldowns()
-      ),
+      // actions.precombat=arcane_intellect
+      Spell.cast("Arcane Intellect", () => !me.hasAura(1459)),
       
-      // Active talents usage (Meteor)
-      this.useActiveTalents(),
-      
-      // Precast for combustion
-      new bt.Selector(
-        spell.cast('Flamestrike', this.getCurrentTarget, () => 
-          !me.hasAura(auras.combustion) && 
-          me.hasAura(auras.furyOfTheSunKing) && 
-          spell.getCooldown('Combustion').remains < spell.getSpell('Flamestrike').castTime &&
-          this.enemyCount() >= Settings.FireMageSKBFlamestrike
-        ),
-        
-        spell.cast('Pyroblast', this.getCurrentTarget, () => {
-          const hasHotStreak = me.hasAura(auras.hotStreak);
-          const hasCombustion = me.hasAura(auras.combustion);
-          
-          // console.debug(`Combustion Pyroblast check: Hot Streak: ${hasHotStreak}, Combustion: ${hasCombustion}`);
-          
-          return hasHotStreak && hasCombustion;
-        }),
-        
-        spell.cast('Meteor', this.getCurrentTarget, () =>
-          !me.hasAura(auras.combustion) &&
-          this.hasTalent('Isothermic Core') &&
-          !this.hasTalent('Unleashed Inferno') &&
-          spell.getCooldown('Combustion').timeleft < spell.getSpell('Meteor').castTime
-        ),
-        
-        spell.cast('Fireball', this.getCurrentTarget, () =>
-          !me.hasAura(auras.combustion) &&
-          spell.getCooldown('Combustion').timeleft < spell.getSpell('Fireball').castTime &&
-          this.enemyCount() < 2 &&
-          !this.isScorchExecutePhase() &&
-          !(this.hasTalent('Sun King\'s Blessing') && this.hasTalent('Flame Accelerant'))
-        ),
-        
-        spell.cast('Scorch', this.getCurrentTarget, () =>
-          !me.hasAura(auras.combustion) &&
-          spell.getCooldown('Combustion').timeleft < spell.getSpell('Scorch').castTime
-        ),
-        
-        // Spend Frostfire Empowerment before combustion
-        spell.cast('Fireball', this.getCurrentTarget, () =>
-          !me.hasAura(auras.combustion) &&
-          me.hasAura(auras.frostfireEmpowerment)
-        )
-      ),
-      
-      // Use combustion when precast is almost finished
-       // Improved Combustion cast with fewer restrictions
-      spell.cast('Combustion', this.getCurrentTarget, () => {
-        if (me.hasAura(auras.combustion) || !Settings.FireMageUseCombustion) {
-          return false;
-        }
-        
-        const combustionCD = spell.getCooldown('Combustion');
-        if (!combustionCD.ready) {
-          return false;
-        }
-        
-        // console.debug('Attempting to cast Combustion!');
-        
-        // Allow casting combustion either during a cast or standalone
-        return true; // If Combustion is ready and we want to use it, just cast it
+      // actions.precombat+=/variable,name=cast_remains_time,value=0.3
+      new bt.Action(() => {
+        this.castRemainsTime = 0.3;
+        return bt.Status.Failure;
       }),
       
-      // Cancel Hyperthermia if SKB proc is available
+      // actions.precombat+=/variable,name=pooling_time,value=10+10*talent.frostfire_bolt
       new bt.Action(() => {
-        if (me.hasAura('Hyperthermia') && me.hasAura(auras.furyOfTheSunKing)) {
-          // In a real script we would use wow.CancelAura() here
-          // console.info('Canceling Hyperthermia aura for Fury of the Sun King usage');
+        this.poolingTime = 10 + (this.hasTalent(431044) ? 10 : 0);
+        return bt.Status.Failure;
+      }),
+      
+      // actions.precombat+=/variable,name=ff_combustion_flamestrike,if=talent.frostfire_bolt,value=4+talent.firefall*99-(talent.mark_of_the_firelord&talent.quickflame&talent.firefall)*96+(!talent.mark_of_the_firelord&!talent.quickflame&!talent.flame_patch)*99+(talent.mark_of_the_firelord&!(talent.quickflame|talent.flame_patch))*2+(!talent.mark_of_the_firelord&(talent.quickflame|talent.flame_patch))*3
+      new bt.Action(() => {
+        if (this.hasTalent(431044)) {
+          this.ffCombustionFlamestrike = 4 + 
+            (this.hasTalent(384033) ? 99 : 0) -
+            (this.hasTalent(450325) && this.hasTalent(450807) && this.hasTalent(384033) ? 96 : 0) +
+            (!this.hasTalent(450325) && !this.hasTalent(450807) && !this.hasTalent(205037) ? 99 : 0) +
+            (this.hasTalent(450325) && !(this.hasTalent(450807) || this.hasTalent(205037)) ? 2 : 0) +
+            (!this.hasTalent(450325) && (this.hasTalent(450807) || this.hasTalent(205037)) ? 3 : 0);
         }
         return bt.Status.Failure;
       }),
       
-      // Hot streak and Hyperthermia usage
-      spell.cast('Flamestrike', this.getCurrentTarget, () => 
-        ((me.hasAura(auras.hotStreak) && this.enemyCount() >= Settings.FireMageCombustionFlamestrike) || 
-         (me.hasAura(auras.hyperthermia) && this.enemyCount() >= (Settings.FireMageCombustionFlamestrike - 1))) &&
-        me.hasAura(auras.combustion)
-      ),
-      
-      spell.cast('Pyroblast', this.getCurrentTarget, () => me.hasAura(auras.hyperthermia)),
-      
-      spell.cast('Pyroblast', this.getCurrentTarget, () => 
-        me.hasAura(auras.hotStreak) && me.hasAura(auras.combustion)
-      ),
-      
-      // Fury of the Sun King usage during combustion
-      spell.cast('Flamestrike', this.getCurrentTarget, () => 
-        me.hasAura(auras.furyOfTheSunKing) && 
-        this.enemyCount() >= Settings.FireMageSKBFlamestrike && 
-        me.hasAura(auras.combustion)
-      ),
-      
-      spell.cast('Pyroblast', this.getCurrentTarget, () => 
-        me.hasAura(auras.furyOfTheSunKing) && me.hasAura(auras.combustion)
-      ),
-      
-      // Fireball with Frostfire Empowerment
-      spell.cast('Fireball', this.getCurrentTarget, () => 
-        me.hasAura(auras.frostfireEmpowerment) && 
-        !me.hasAura(auras.hotStreak)
-      ),
-      
-      // Improved Scorch management
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        this.hasTalent('Improved Scorch') && 
-        this.improviedScorchDebuffRemains() < 3 * 1.5 && // 3 GCDs
-        this.enemyCount() < Settings.FireMageCombustionFlamestrike
-      ),
-      
-      // Call the dedicated Phoenix Flames method
-      this.usePhoenixFlames(),
-
-      // Heat Shimmer proc usage
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        me.hasAura(auras.heatShimmer) && 
-        (this.hasTalent('Scald') || this.hasTalent('Improved Scorch')) && 
-        this.enemyCount() < Settings.FireMageCombustionFlamestrike
-      ),
-      
-      // Phoenix Flames for Hot Streak generation during combustion
-      spell.cast('Phoenix Flames', this.getCurrentTarget, () => 
-        spell.getCharges('Phoenix Flames') > 0 &&
-        !spell.isGlobalCooldown()
-      ),
-      
-      // Scorch as filler during combustion
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        me.hasAura(auras.combustion) && 
-        spell.getSpell('Scorch').castTime >= 1.5
-      ),
-      
-      // Fireball as last resort
-      spell.cast('Fireball', this.getCurrentTarget)
-    );
-  }
-
-  // Combustion cooldowns (trinkets, racials, etc.)
-  combustionCooldowns() {
-    return new bt.Selector(
-      // Consumables
-      // spell.cast('Potion', () => me, () => me.hasAura(auras.combustion)),
-      
-      // Racials
-      new bt.Decorator(
-        () => Settings.FireMageUseRacials,
-        new bt.Selector(
-          spell.cast('Blood Fury', () => me, () => me.hasAura(auras.combustion)),
-          spell.cast('Berserking', () => me, () => me.hasAura(auras.combustion)),
-          spell.cast('Fireblood', () => me, () => me.hasAura(auras.combustion)),
-          spell.cast('Ancestral Call', () => me, () => me.hasAura(auras.combustion))
-        )
-      ),
-      
-      // External buffs (handled by invoke_external_buff in SimC)
-      
-      // Trinket usage
-      new bt.Decorator(
-        () => Settings.FireMageUseTrinkets && me.hasAura(auras.combustion),
-        new bt.Selector(
-          common.useEquippedItemByName("Gladiators Badge"),
-          common.useEquippedItemByName("Treacherous Transmitter"),
-          common.useEquippedItemByName("Imperfect Ascendancy Serum"),
-          common.useEquippedItemByName("Neural Synapse Enhancer"),
-          common.useEquippedItemByName("Flarendos Pilot Light"),
-          common.useEquippedItemByName("House of Cards"),
-          common.useEquippedItemByName("Funhouse Lens"),
-          common.useEquippedItemByName("Quickwick Candlestick"),
-          common.useEquippedItemByName("Signet of the Priory"),
-          common.useEquippedItemByName("Soulletting Ruby"),
-          common.useEquippedItemByName("Hyperthread Wristwraps", () => spell.getCharges('Fire Blast') === 0)
-        )
-      )
-    );
-  }
-
-  // Active talents like Meteor and Dragon's Breath
-  useActiveTalents() {
-    return new bt.Selector(
-      // Meteor usage
-      spell.cast('Meteor', this.getCurrentTarget, () => {
-        if (!me.hasAura('Meteor'))
-          return null;
-
-        const combustionAura = me.getAura(auras.combustion);
-        const combustionRemaining = combustionAura ? combustionAura.remaining : 0;
-        
-        return (me.hasAura(auras.combustion) && me.getAura(auras.combustion).remaining < spell.getSpell('Meteor').castTime) || 
-               (this.timeToCombustion <= 0 || (combustionAura && combustionRemaining > spell.getSpell('Meteor').travelTime));
+      // actions.precombat+=/variable,name=ff_filler_flamestrike,if=talent.frostfire_bolt,value=4+talent.firefall*99-(talent.mark_of_the_firelord&talent.flame_patch&talent.firefall)*96+(!talent.mark_of_the_firelord&!talent.quickflame&!talent.flame_patch)*99+(talent.mark_of_the_firelord&!(talent.quickflame|talent.flame_patch))*2+(!talent.mark_of_the_firelord&(talent.quickflame|talent.flame_patch))*3
+      new bt.Action(() => {
+        if (this.hasTalent(431044)) {
+          this.ffFillerFlamestrike = 4 + 
+            (this.hasTalent(384033) ? 99 : 0) -
+            (this.hasTalent(450325) && this.hasTalent(205037) && this.hasTalent(384033) ? 96 : 0) +
+            (!this.hasTalent(450325) && !this.hasTalent(450807) && !this.hasTalent(205037) ? 99 : 0) +
+            (this.hasTalent(450325) && !(this.hasTalent(450807) || this.hasTalent(205037)) ? 2 : 0) +
+            (!this.hasTalent(450325) && (this.hasTalent(450807) || this.hasTalent(205037)) ? 3 : 0);
+        }
+        return bt.Status.Failure;
       }),
       
-      // Dragon's Breath with Alexstrasza's Fury
-      spell.cast('Dragon\'s Breath', this.getCurrentTarget, () =>
-        this.hasTalent('Alexstrasza\'s Fury') && 
-        !me.hasAura(auras.combustion) && 
-        !me.hasAura(auras.hotStreak) && 
-        (me.hasAura(auras.feelTheBurn) || CombatTimer.getCombatTimeSeconds() > 15) && 
-        !this.isScorchExecutePhase()
-      )
+      // actions.precombat+=/variable,name=sf_combustion_flamestrike,if=talent.spellfire_spheres,value=5+(!talent.mark_of_the_firelord)*99+(!(talent.flame_patch|talent.quickflame)&talent.firefall)*99+talent.firefall+(!(talent.flame_patch|talent.quickflame))*3
+      new bt.Action(() => {
+        if (this.hasTalent(448601)) {
+          this.sfCombustionFlamestrike = 5 + 
+            (!this.hasTalent(450325) ? 99 : 0) +
+            (!(this.hasTalent(205037) || this.hasTalent(450807)) && this.hasTalent(384033) ? 99 : 0) +
+            (this.hasTalent(384033) ? 1 : 0) +
+            (!(this.hasTalent(205037) || this.hasTalent(450807)) ? 3 : 0);
+        }
+        return bt.Status.Failure;
+      }),
+      
+      // actions.precombat+=/variable,name=sf_filler_flamestrike,if=talent.spellfire_spheres,value=4+talent.firefall+!talent.mark_of_the_firelord+!(talent.flame_patch|talent.quickflame)+(!talent.mark_of_the_firelord&!(talent.flame_patch|talent.quickflame))*2+(!talent.mark_of_the_firelord&!(talent.flame_patch|talent.quickflame)&talent.firefall)*99
+      new bt.Action(() => {
+        if (this.hasTalent(448601)) {
+          this.sfFillerFlamestrike = 4 +
+            (this.hasTalent(384033) ? 1 : 0) +
+            (!this.hasTalent(450325) ? 1 : 0) +
+            (!(this.hasTalent(205037) || this.hasTalent(450807)) ? 1 : 0) +
+            (!this.hasTalent(450325) && !(this.hasTalent(205037) || this.hasTalent(450807)) ? 2 : 0) +
+            (!this.hasTalent(450325) && !(this.hasTalent(205037) || this.hasTalent(450807)) && this.hasTalent(384033) ? 99 : 0);
+        }
+        return bt.Status.Failure;
+      }),
+      
+      // Mirror Image precombat
+      Spell.cast("Mirror Image", () => true),
+      
+      // actions.precombat+=/frostfire_bolt,if=talent.frostfire_bolt
+      Spell.cast("Frostfire Bolt", () => this.hasTalent(431044)),
+      
+      // actions.precombat+=/pyroblast
+      // Spell.cast("Pyroblast", () => true)
     );
   }
 
-  // Shifting Power usage outside of combustion
-  // Improved Shifting Power implementation
- // Updated Shifting Power implementation to exactly match the APL
-useShiftingPower() {
-  if(spell.getCooldown('Combustion').ready || spell.getCooldown('Combustion').timeleft < 20000) {
-    return false;
+  cooldowns() {
+    return new bt.Selector(
+      // actions.cds=phoenix_flames,if=time=0&!talent.firestarter
+      Spell.cast("Phoenix Flames", () => false), // Skip for now as it's for time=0 (startup)
+      
+      // actions.cds+=/variable,name=combustion_precast_time,value=(talent.frostfire_bolt*(cooldown.meteor.ready+action.fireball.cast_time*!improved_scorch.active+action.scorch.cast_time*improved_scorch.active)+talent.spellfire_spheres*action.scorch.cast_time)-variable.cast_remains_time
+      new bt.Action(() => {
+        const meteorReady = this.hasSpell(SPELLS.METEOR) && this.getSpellCooldown(SPELLS.METEOR).ready ? 1 : 0;
+        const fireballCastTime = !this.isImprovedScorchActive() ? Spell.getSpell(SPELLS.FIREBALL).castTime / 1000 : 0;
+        const scorchCastTime = this.isImprovedScorchActive() ? Spell.getSpell(SPELLS.SCORCH).castTime / 1000 : 0;
+        
+        this.combustionPrecastTime = ((this.hasTalent(SPELLS.FROSTFIRE_BOLT) ? (meteorReady + fireballCastTime + scorchCastTime) : 0) +
+          (this.hasTalent(SPELLS.SPELLFIRE_SPHERES) ? scorchCastTime : 0)) - this.castRemainsTime;
+        
+        return bt.Status.Failure;
+      }),
+      
+      // Items, Racials and Externals
+      Spell.cast("Berserking", () => me.hasAura(190319) && this.getAuraRemainingTime(190319) > 7),
+      Spell.cast("Blood Fury", () => !this.hasTalent(383886) && (Spell.getCooldown("Combustion").timeleft <= this.combustionPrecastTime || me.hasAura(190319) && this.getAuraRemainingTime(190319) > 7)),
+      Spell.cast("Fireblood", () => me.hasAura(190319) && this.getAuraRemainingTime(190319) > 7),
+      Spell.cast("Ancestral Call", () => !this.hasTalent(383886) && (Spell.getCooldown("Combustion").timeleft <= this.combustionPrecastTime || me.hasAura(190319) && this.getAuraRemainingTime(190319) > 7))
+    );
   }
 
-  return spell.cast('Shifting Power', this.getCurrentTarget, () => {
-    // Get the current target for debuff checks
+  ffCombustion() {
+    return new bt.Selector(
+      // actions.ff_combustion=combustion,use_off_gcd=1,use_while_casting=1,if=buff.combustion.down
+      Spell.cast("Combustion", () => 
+        this.hasSpell(SPELLS.COMBUSTION) && 
+        !me.hasAura(SPELLS.COMBUSTION)
+      ),
+      
+      // actions.ff_combustion+=/meteor,if=buff.combustion.down|buff.combustion.remains>2
+      Spell.cast("Meteor", () => 
+        this.hasSpell(SPELLS.METEOR) && 
+        (!me.hasAura(SPELLS.COMBUSTION) || this.getAuraRemainingTime(SPELLS.COMBUSTION) > 2)
+      ),
+      
+      // actions.ff_combustion+=/scorch,if=buff.combustion.down&(buff.heat_shimmer.react&talent.improved_scorch|improved_scorch.active)&!prev_gcd.1.scorch
+      Spell.cast("Scorch", () => 
+        !me.hasAura(SPELLS.COMBUSTION) && 
+        ((me.hasAura(SPELLS.HEAT_SHIMMER) && this.hasTalent(SPELLS.IMPROVED_SCORCH)) || this.isImprovedScorchActive()) && 
+        !this.lastGcdWas("Scorch")
+      ),
+      
+      // actions.ff_combustion+=/flamestrike,if=buff.fury_of_the_sun_king.up&active_enemies>=variable.ff_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.SUN_KINGS_BLESSING) && 
+        this.getEnemiesInRange(10) >= this.ffCombustionFlamestrike
+      ),
+      
+      // actions.ff_combustion+=/pyroblast,if=buff.fury_of_the_sun_king.up
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.SUN_KINGS_BLESSING)),
+      
+      // actions.ff_combustion+=/fireball,if=buff.combustion.down
+      Spell.cast("Fireball", () => !me.hasAura(SPELLS.COMBUSTION)),
+      
+      // actions.ff_combustion+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&gcd.remains<gcd.max&buff.combustion.up&!buff.hot_streak.react&hot_streak_spells_in_flight+buff.heating_up.react*(gcd.remains>0)<2&(buff.fury_of_the_sun_king.down|action.pyroblast.executing)
+      Spell.cast("Fire Blast", () => 
+        this.hasSpell(SPELLS.FIRE_BLAST) && 
+        this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+        this.getGcdRemains() < 1.5 && 
+        me.hasAura(SPELLS.COMBUSTION) && 
+        !me.hasAura(SPELLS.HOT_STREAK) && 
+        (me.hasAura(SPELLS.HEATING_UP) ? 1 : 0) * (this.getGcdRemains() > 0 ? 1 : 0) < 2 && 
+        !me.hasAura(SPELLS.SUN_KINGS_BLESSING)
+      ),
+      
+      // actions.ff_combustion+=/flamestrike,if=buff.hyperthermia.react&active_enemies>=variable.ff_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HYPERTHERMIA_AURA) && 
+        this.getEnemiesInRange(10) >= this.ffCombustionFlamestrike
+      ),
+      
+      // actions.ff_combustion+=/flamestrike,if=buff.hot_streak.react&active_enemies>=variable.ff_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HOT_STREAK) && 
+        this.getEnemiesInRange(10) >= this.ffCombustionFlamestrike
+      ),
+      
+      // actions.ff_combustion+=/pyroblast,if=buff.hyperthermia.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HYPERTHERMIA_AURA)),
+      
+      // actions.ff_combustion+=/pyroblast,if=buff.hot_streak.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HOT_STREAK)),
+      
+      // actions.ff_combustion+=/phoenix_flames,if=buff.excess_frost.up&(!action.pyroblast.in_flight|!buff.heating_up.react)
+      Spell.cast("Phoenix Flames", () => 
+        this.hasSpell(SPELLS.PHOENIX_FLAMES) && 
+        me.hasAura(SPELLS.EXCESS_FROST) && 
+        me.hasAura(SPELLS.HEATING_UP)
+      ),
+      
+      // actions.ff_combustion+=/fireball
+      Spell.cast("Fireball")
+    );
+  }
+
+  ffFiller() {
+    return new bt.Selector(
+      // actions.ff_filler=meteor,if=cooldown.combustion.remains>variable.pooling_time
+      Spell.cast("Meteor", () => 
+        this.hasSpell(SPELLS.METEOR) && 
+        this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime
+      ),
+      
+      // actions.ff_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&buff.heating_up.react&(cooldown.combustion.remains>variable.pooling_time|talent.sun_kings_blessing)
+      Spell.cast("Fire Blast", () => 
+        this.hasSpell(SPELLS.FIRE_BLAST) && 
+        this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+        me.hasAura(SPELLS.HEATING_UP) && 
+        (this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime || this.hasTalent(SPELLS.SUN_KINGS_BLESSING))
+      ),
+      
+      // actions.ff_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&!buff.heating_up.react&!buff.hot_streak.react&(cooldown.combustion.remains>variable.pooling_time|talent.sun_kings_blessing)
+      Spell.cast("Fire Blast", () => 
+        this.hasSpell(SPELLS.FIRE_BLAST) && 
+        this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+        !me.hasAura(SPELLS.HEATING_UP) && 
+        !me.hasAura(SPELLS.HOT_STREAK) && 
+        (this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime || this.hasTalent(SPELLS.SUN_KINGS_BLESSING))
+      ),
+      
+      // actions.ff_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&charges=3
+      Spell.cast("Fire Blast", () => 
+        this.hasSpell(SPELLS.FIRE_BLAST) && 
+        this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+        Spell.getCharges(SPELLS.FIRE_BLAST) === 3
+      ),
+      
+      // actions.ff_filler+=/scorch,if=(improved_scorch.active|buff.heat_shimmer.react&talent.improved_scorch)&debuff.improved_scorch.remains<3*gcd.max&!prev_gcd.1.scorch
+      Spell.cast("Scorch", () => 
+        (this.isImprovedScorchActive() || (me.hasAura(SPELLS.HEAT_SHIMMER) && this.hasTalent(SPELLS.IMPROVED_SCORCH))) && 
+        this.getDebuffRemainingTime(SPELLS.IMPROVED_SCORCH_DEBUFF) < 3 * 1.5 && 
+        !this.lastGcdWas("Scorch")
+      ),
+      
+      // actions.ff_filler+=/flamestrike,if=buff.fury_of_the_sun_king.up&active_enemies>=variable.ff_filler_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.SUN_KINGS_BLESSING) && 
+        this.getEnemiesInRange(10) >= this.ffFillerFlamestrike
+      ),
+      
+      // actions.ff_filler+=/flamestrike,if=buff.hyperthermia.react&active_enemies>=variable.ff_filler_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HYPERTHERMIA_AURA) && 
+        this.getEnemiesInRange(10) >= this.ffFillerFlamestrike
+      ),
+      
+      // actions.ff_filler+=/flamestrike,if=prev_gcd.1.scorch&buff.heating_up.react&active_enemies>=variable.ff_filler_flamestrike
+      Spell.cast("Flamestrike", () => 
+        this.lastGcdWas("Scorch") && 
+        me.hasAura(SPELLS.HEATING_UP) && 
+        this.getEnemiesInRange(10) >= this.ffFillerFlamestrike
+      ),
+      
+      // actions.ff_filler+=/flamestrike,if=buff.hot_streak.react&active_enemies>=variable.ff_filler_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HOT_STREAK) && 
+        this.getEnemiesInRange(10) >= this.ffFillerFlamestrike
+      ),
+      
+      // actions.ff_filler+=/pyroblast,if=buff.fury_of_the_sun_king.up
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.SUN_KINGS_BLESSING)),
+      
+      // actions.ff_filler+=/pyroblast,if=buff.hyperthermia.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HYPERTHERMIA_AURA)),
+      
+      // actions.ff_filler+=/pyroblast,if=prev_gcd.1.scorch&buff.heating_up.react
+      Spell.cast("Pyroblast", () => this.lastGcdWas("Scorch") && me.hasAura(SPELLS.HEATING_UP)),
+      
+      // actions.ff_filler+=/pyroblast,if=buff.hot_streak.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HOT_STREAK)),
+      
+      // actions.ff_filler+=/shifting_power,if=cooldown.combustion.remains>10&!firestarter.active
+      Spell.cast("Shifting Power", () => 
+        this.hasSpell(SPELLS.SHIFTING_POWER) && 
+        this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > 10 && 
+        !this.isFirestarterActive()
+      ),
+      
+      // actions.ff_filler+=/fireball,if=talent.sun_kings_blessing&buff.frostfire_empowerment.react
+      Spell.cast("Fireball", () => 
+        this.hasTalent(SPELLS.SUN_KINGS_BLESSING) && 
+        me.hasAura(SPELLS.FROSTFIRE_EMPOWERMENT)
+      ),
+      
+      // actions.ff_filler+=/phoenix_flames,if=buff.excess_frost.up|talent.sun_kings_blessing
+      Spell.cast("Phoenix Flames", () => 
+        this.hasSpell(SPELLS.PHOENIX_FLAMES) && 
+        (me.hasAura(SPELLS.EXCESS_FROST) || this.hasTalent(SPELLS.SUN_KINGS_BLESSING))
+      ),
+      
+      // actions.ff_filler+=/scorch,if=talent.sun_kings_blessing&(scorch_execute.active|buff.heat_shimmer.react)
+      Spell.cast("Scorch", () => 
+        this.hasTalent(SPELLS.SUN_KINGS_BLESSING) && 
+        (this.isScorchExecuteActive() || me.hasAura(SPELLS.HEAT_SHIMMER))
+      ),
+      
+      // actions.ff_filler+=/fireball
+      Spell.cast("Fireball")
+    );
+  }
+
+  sfCombustion() {
+    return new bt.Selector(
+      // actions.sf_combustion=combustion,use_off_gcd=1,use_while_casting=1,if=buff.combustion.down
+      Spell.cast("Combustion", () => 
+        this.hasSpell(SPELLS.COMBUSTION) && 
+        !me.hasAura(SPELLS.COMBUSTION)
+      ),
+      
+      // actions.sf_combustion+=/scorch,if=buff.combustion.down
+      Spell.cast("Scorch", () => !me.hasAura(SPELLS.COMBUSTION)),
+      
+      // actions.sf_combustion+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&gcd.remains<gcd.max&buff.combustion.up&!buff.hot_streak.react&hot_streak_spells_in_flight+buff.heating_up.react*(gcd.remains>0)<2
+      Spell.cast("Fire Blast", () => 
+        this.hasSpell(SPELLS.FIRE_BLAST) && 
+        this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+        this.getGcdRemains() < 1.5 && 
+        me.hasAura(SPELLS.COMBUSTION) && 
+        !me.hasAura(SPELLS.HOT_STREAK) && 
+        (me.hasAura(SPELLS.HEATING_UP) ? 1 : 0) * (this.getGcdRemains() > 0 ? 1 : 0) < 2
+      ),
+      
+      // actions.sf_combustion+=/flamestrike,if=buff.hyperthermia.react&active_enemies>=variable.sf_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HYPERTHERMIA_AURA) && 
+        this.getEnemiesInRange(10) >= this.sfCombustionFlamestrike
+      ),
+      
+      // actions.sf_combustion+=/flamestrike,if=buff.hot_streak.react&active_enemies>=variable.sf_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        me.hasAura(SPELLS.HOT_STREAK) && 
+        this.getEnemiesInRange(10) >= this.sfCombustionFlamestrike
+      ),
+      
+      // actions.sf_combustion+=/flamestrike,if=prev_gcd.1.scorch&buff.heating_up.react&active_enemies>=variable.sf_combustion_flamestrike
+      Spell.cast("Flamestrike", () => 
+        this.lastGcdWas("Scorch") && 
+        me.hasAura(SPELLS.HEATING_UP) && 
+        this.getEnemiesInRange(10) >= this.sfCombustionFlamestrike
+      ),
+      
+      // actions.sf_combustion+=/pyroblast,if=buff.hyperthermia.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HYPERTHERMIA_AURA)),
+      
+      // actions.sf_combustion+=/pyroblast,if=buff.hot_streak.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HOT_STREAK)),
+      
+      // actions.sf_combustion+=/pyroblast,if=prev_gcd.1.scorch&buff.heating_up.react
+      Spell.cast("Pyroblast", () => this.lastGcdWas("Scorch") && me.hasAura(SPELLS.HEATING_UP)),
+      
+      // actions.sf_combustion+=/scorch,if=buff.heat_shimmer.react&!scorch_execute.active
+      Spell.cast("Scorch", () => me.hasAura(SPELLS.HEAT_SHIMMER) && !this.isScorchExecuteActive()),
+      
+      // actions.sf_combustion+=/phoenix_flames
+      Spell.cast("Phoenix Flames", () => this.hasSpell(SPELLS.PHOENIX_FLAMES)),
+      
+      // actions.sf_combustion+=/scorch
+      Spell.cast("Scorch")
+    );
+  }
+
+  sfFiller() {
+    return new bt.Selector(
+      // actions.sf_filler=fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&buff.heating_up.react&buff.hyperthermia.react&cooldown.combustion.remains>variable.pooling_time
+      Spell.cast("Fire Blast", () => 
+        
+        me.hasVisibleAuraByMe(SPELLS.HEATING_UP) ||
+        me.hasVisibleAuraByMe(SPELLS.HYPERTHERMIA_AURA) ||
+        Spell.getCharges(SPELLS.FIRE_BLAST) > 2
+      ),
+      
+      // // actions.sf_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&buff.heating_up.react&cooldown.combustion.remains>variable.pooling_time
+      // Spell.cast("Fire Blast", () => 
+        
+      //   // this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+      //   me.hasAura(SPELLS.HEATING_UP) &&
+      //   this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime
+      // ),
+      
+      // // actions.sf_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&!buff.heating_up.react&!buff.hot_streak.react&cooldown.combustion.remains>variable.pooling_time
+      // Spell.cast("Fire Blast", () => 
+      //   !me.hasAura(SPELLS.HEATING_UP) && 
+      //   !me.hasAura(SPELLS.HOT_STREAK) && 
+      //   this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime
+      // ),
+      
+      // // actions.sf_filler+=/fire_blast,use_off_gcd=1,use_while_casting=1,if=cooldown_react&charges=3&cooldown.combustion.remains>variable.pooling_time*0.3
+      // Spell.cast("Fire Blast", () => 
+      //   Spell.getCharges(SPELLS.FIRE_BLAST) === 3 && 
+      //   this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime * 0.3
+      // ),
+      
+      // // actions.sf_filler+=/fire_blast,use_off_gcd=1,if=active_enemies>=2&cooldown_react&buff.glorious_incandescence.react&!buff.heating_up.react&!buff.hot_streak.react&cooldown.combustion.remains>variable.pooling_time
+      // Spell.cast("Fire Blast", () => 
+      //   this.getEnemiesInRange(10) >= 2 && 
+      //   this.hasSpell(SPELLS.FIRE_BLAST) && 
+      //   this.getSpellCooldown(SPELLS.FIRE_BLAST).ready && 
+      //   me.hasAura(SPELLS.GLORIOUS_INCANDESCENCE) && 
+      //   !me.hasAura(SPELLS.HEATING_UP) && 
+      //   !me.hasAura(SPELLS.HOT_STREAK) && 
+      //   this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > this.poolingTime
+      // ),
+      
+      // actions.sf_filler+=/flamestrike,if=buff.hyperthermia.react&active_enemies>=variable.sf_filler_flamestrike
+      Spell.cast("Flamestrike", this.getCurrentTarget, () => 
+        me.hasAura(SPELLS.HYPERTHERMIA_AURA) && 
+        this.enemiesAroundTarget(8) >= 3
+      ),
+      
+      // actions.sf_filler+=/flamestrike,if=buff.hot_streak.react&active_enemies>=variable.sf_filler_flamestrike
+      Spell.cast("Flamestrike", this.getCurrentTarget, () => 
+        me.hasAura(SPELLS.HOT_STREAK) && 
+      this.enemiesAroundTarget(8) >= 3
+      ),
+      
+      // actions.sf_filler+=/flamestrike,if=prev_gcd.1.scorch&buff.heating_up.react&active_enemies>=variable.sf_filler_flamestrike
+      Spell.cast("Flamestrike", this.getCurrentTarget, () => 
+        this.lastGcdWas("Scorch") && 
+        me.hasAura(SPELLS.HEATING_UP) && 
+        this.enemiesAroundTarget(8) >= 3
+      ),
+      
+      // actions.sf_filler+=/pyroblast,if=buff.hyperthermia.react
+      Spell.cast("Pyroblast", () => me.hasAura(SPELLS.HYPERTHERMIA_AURA)),
+      
+      // actions.sf_filler+=/pyroblast,if=buff.hot_streak.react&cooldown.combustion.remains>variable.pooling_time*0.3
+      Spell.cast("Pyroblast", () => 
+        me.hasAura(SPELLS.HOT_STREAK)),
+      
+      // actions.sf_filler+=/pyroblast,if=prev_gcd.1.scorch&buff.heating_up.react&cooldown.combustion.remains>variable.pooling_time*0.3
+      // Spell.cast("Pyroblast", () =>  
+      //   me.hasAura(SPELLS.HEATING_UP)
+      // ),
+      
+      // actions.sf_filler+=/shifting_power,if=cooldown.combustion.remains>8
+      Spell.cast("Shifting Power", () => 
+        this.hasSpell(SPELLS.SHIFTING_POWER) && 
+        this.getSpellCooldown(SPELLS.COMBUSTION).timeleft > 8
+      ),
+      
+      // actions.sf_filler+=/scorch,if=buff.heat_shimmer.react
+      Spell.cast("Scorch", () => me.hasAura(SPELLS.HEAT_SHIMMER)),
+      
+      // actions.sf_filler+=/meteor,if=active_enemies>=2
+      Spell.cast("Meteor", () => 
+        this.hasSpell(SPELLS.METEOR) && 
+        this.getEnemiesInRange(10) >= 2
+      ),
+      
+      // actions.sf_filler+=/phoenix_flames
+      Spell.cast("Phoenix Flames", () => this.hasSpell(SPELLS.PHOENIX_FLAMES)),
+      
+      // actions.sf_filler+=/scorch,if=scorch_execute.active
+      Spell.cast("Scorch", () => this.isScorchExecuteActive()),
+      
+      // actions.sf_filler+=/fireball
+      Spell.cast("Fireball")
+    );
+  }
+
+  // Helper methods
+  hasTalent(spellId) {
+    return Spell.isSpellKnown(spellId);
+  }
+
+  hasSpell(spellId) {
+    return Spell.isSpellKnown(spellId);
+  }
+
+  isImprovedScorchActive() {
+    return me.hasAura(SPELLS.IMPROVED_SCORCH);
+  }
+
+  isScorchExecuteActive() {
     const target = this.getCurrentTarget();
-    if (!target) return false;
-    
-    // Check if Improved Scorch is talented and relevant conditions
-    const isImprovedScorchTalented = this.hasTalent('Improved Scorch');
-    const improvedScorchDebuff = isImprovedScorchTalented ? target.hasAuraByMe(auras.improvedScorch) : null;
-    const shiftingPowerCastTime = spell.getSpell('Shifting Power').castTime;
-    const scorchCastTime = spell.getSpell('Scorch').castTime;
-    
-    // Precisely matching the APL condition by condition:
-    // 1. Combustion is down
-    const combustionDown = !me.hasAura(auras.combustion);
-    
-    // 2. Either Improved Scorch is not talented, OR debuff has enough time AND no Fury of the Sun King
-    // const improvedScorchCondition = !isImprovedScorchTalented || 
-    //                                (improvedScorchDebuff && 
-    //                                 improvedScorchDebuff.remaining > (shiftingPowerCastTime + scorchCastTime) && 
-    //                                 !me.hasAura(auras.furyOfTheSunKing));
-
-    const improvedScorchCondition = true;
-    
-    // 3. No Hot Streak
-    const noHotStreak = !me.hasAura(auras.hotStreak);
-    
-    // 4. No Hyperthermia
-    const noHyperthermia = !me.hasAura(auras.hyperthermia);
-    
-    // 5. Either Phoenix Flames has 1 or fewer charges OR Combustion cooldown is less than 20 seconds
-    const cooldownCondition = spell.getCharges('Phoenix Flames') <= 1 || 
-                             spell.getCooldown('Combustion').timeleft < 20000; // in ms
-    
-    // All conditions must be true for Shifting Power to be used
-    return combustionDown && improvedScorchCondition && noHotStreak && 
-           noHyperthermia && cooldownCondition;
-  });
-}
-
-  // Standard rotation outside of combustion
-  standardRotation() {
-    return new bt.Selector(
-      // Hot Streak and AoE flamestrike usage
-      spell.cast('Flamestrike', this.getCurrentTarget, () => 
-        this.enemyCount() >= Settings.FireMageHotStreakFlamestrike && 
-        (me.hasAura(auras.hotStreak) || me.hasAura(auras.hyperthermia))
-      ),
-      
-      // Meteor with Unleashed Inferno
-      spell.cast('Meteor', this.getCurrentTarget, () => 
-        this.hasTalent('Unleashed Inferno') && 
-        me.getAuraStacks('Excess Fire') < 2
-      ),
-      
-      // Hot Streak Pyroblast for single target
-      spell.cast('Pyroblast', this.getCurrentTarget, req => (me.hasAura(auras.hotStreak) || me.hasAura(auras.hyperthermia))),
-      
-      // Fury of the Sun King AoE Flamestrike
-      spell.cast('Flamestrike', this.getCurrentTarget, () => 
-        this.enemyCount() >= Settings.FireMageSKBFlamestrike && 
-        me.hasAura(auras.furyOfTheSunKing) && 
-        me.getAura(auras.furyOfTheSunKing).expiration_delay_remains === 0
-      ),
-      
-      // Improved Scorch management
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        this.hasTalent('Improved Scorch') && 
-        this.improviedScorchDebuffRemains() < 3 * 1.5 && 
-        (this.wasLastSpell() != 'Scorch')
-      ),
-      
-      // Fury of the Sun King Pyroblast
-      spell.cast('Pyroblast', this.getCurrentTarget, () => 
-        me.hasAura(auras.furyOfTheSunKing) && 
-        me.getAura(auras.furyOfTheSunKing).expiration_delay_remains === 0
-      ),
-      
-      // Fire Blast usage during non-combustion
-      spell.cast('Fire Blast', this.getCurrentTarget, () => {
-        // Don't use during Firestarter
-        if (this.isFirestarterActive() || this.isFireBlastPooling()) {
-          return false;
-        }
-        
-        // Don't use when Fury of the Sun King is up
-        if (me.hasAura(auras.furyOfTheSunKing)) {
-          return false;
-        }
-        
-        // Fireball/Pyroblast cast with Heating Up
-        const duringCast = (me.isCasting && 
-                            (this.isCurrentlyCasting('Fireball') || this.isCurrentlyCasting('Pyroblast')) && 
-                            me.hasAura(auras.heatingUp) && 
-                            me.getCurrentCastTimeRemaining() < 0.5);
-        
-        // Execute phase with Searing Touch
-        const duringExecute = this.isScorchExecutePhase() && 
-                             (!this.hasTalent('Improved Scorch') || 
-                             target.getAuraByMe(auras.improvedScorch)?.stack === target.getAuraByMe(auras.improvedScorch)?.max_stack || 
-                             spell.getFullRechargeTime('Fire Blast') < 3000) && 
-                             ((me.hasAura(auras.heatingUp) && !this.isCurrentlyCasting('Scorch')) || 
-                             (!me.hasAura(auras.hotStreak) && !me.hasAura(auras.heatingUp) && 
-                             this.isCurrentlyCasting('Scorch') && this.getHotStreakSpellsInFlight() === 0));
-        
-        return duringCast || duringExecute;
-      }),
-      
-      // Fire Blast with Hyperthermia
-      spell.cast('Fire Blast', this.getCurrentTarget, () => 
-        me.hasAura(auras.hyperthermia) && 
-        spell.getChargesFractional('Fire Blast') > 1 && 
-        me.hasAura(auras.heatingUp)
-      ),
-      
-      // Pyroblast after Scorch during execute
-      spell.cast('Pyroblast', this.getCurrentTarget, () => 
-        this.wasLastSpell('Scorch') && 
-        me.hasAura(auras.heatingUp) && 
-        this.isScorchExecutePhase() && 
-        this.enemyCount() < Settings.FireMageHotStreakFlamestrike
-      ),
-      
-      // Fireball with Frostfire Empowerment
-      spell.cast('Fireball', this.getCurrentTarget, () => me.hasAura(auras.frostfireEmpowerment)),
-      
-      // Heat Shimmer proc usage
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        me.hasAura(auras.heatShimmer) && 
-        (this.hasTalent('Scald') || this.hasTalent('Improved Scorch')) && 
-        this.enemyCount() < Settings.FireMageCombustionFlamestrike
-      ),
-      
-      // Phoenix Flames usage
-      spell.cast('Phoenix Flames', this.getCurrentTarget, () => {
-        // Don't use if we're pooling for combustion
-        if (this.isPhoenixFlamesPooling()) {
-          return false;
-        }
-        
-        // Check if we have charges and not on GCD
-        return spell.getCharges('Phoenix Flames') > 0 && !spell.isGlobalCooldown();
-      }),
-      
-      // Dragon's Breath for AoE with Alexstrasza's Fury
-      spell.cast('Dragon\'s Breath', this.getCurrentTarget, () => 
-        this.enemyCount() > 1 && this.hasTalent('Alexstrasza\'s Fury')
-      ),
-      
-      // Scorch during execute phase or with Heat Shimmer
-      spell.cast('Scorch', this.getCurrentTarget, () => 
-        this.isScorchExecutePhase() || me.hasAura(auras.heatShimmer)
-      ),
-      
-      // Hard cast flamestrike for large AoE
-      spell.cast('Flamestrike', this.getCurrentTarget, () => 
-        this.enemyCount() >= Settings.FireMageHardCastFlamestrike
-      ),
-      
-      // Arcane Explosion for AoE if enough mana
-      spell.cast('Arcane Explosion', this.getCurrentTarget, () => 
-        this.enemyCount() >= this.arcaneExplosionTargets && 
-        me.powerByType(0) >= (me.maxPowerByType(0) * this.arcaneExplosionManaPercent / 100)
-      ),
-      
-      // Fireball as filler
-      spell.cast('Fireball', this.getCurrentTarget)
-    );
-  }
-  
-
-  // Helper functions
-  shouldStartCombustion() {
-    // Check if Combustion is available
-    const combustionCD = spell.getCooldown('Combustion');
-    const shouldStart = (combustionCD.ready || this.timeToCombustion <= 0) &&
-           !me.hasAura(auras.combustion) &&
-           Settings.FireMageUseCombustion;
-    
-    // Log the decision for debugging
-    // console.debug(`Should start Combustion: ${shouldStart}, timeToCombustion: ${this.timeToCombustion/1000}s, cooldown ready: ${combustionCD.ready}, hasAura: ${me.hasAura(auras.combustion)}, setting: ${Settings.FireMageUseCombustion}`);
-    
-    return shouldStart;
+    return target && target.pctHealth < 30;
   }
 
-  isCurrentlyCasting(spellName) {
-    if (!me.isCasting) {
-      return false;
-    }
-    
-    const currentSpellId = me.currentCast;
-    if (!currentSpellId) {
-      return false;
-    }
-    const currentSpell = spell.getSpell(currentSpellId);
-    return currentSpell && currentSpell.name.toLowerCase() === spellName.toLowerCase();
-  }
-
-  hasValidHotStreak() {
-    // Check for actual Hot Streak or Hyperthermia buffs
-    const hasHotStreak = me.hasAura(auras.hotStreak);
-    const hasHyperthermia = me.hasAura(auras.hyperthermia);
-    
-    // Debug the aura check
-    // console.debug(`Hot Streak check: Hot Streak aura: ${hasHotStreak}, Hyperthermia: ${hasHyperthermia}`);
-    
-    return hasHotStreak || hasHyperthermia;
-  }
   isFirestarterActive() {
     const target = this.getCurrentTarget();
-    return target && this.hasTalent('Firestarter') && target.pctHealth >= 90;
-  }
-
-  getFirestarterRemains() {
-    const target = this.getCurrentTarget();
-    // Estimate how long until target drops below 90% health
-    // This is a simplified approach - in reality you'd need better estimation
-    return target && target.pctHealth >= 90 ? 15 : 0;
-  }
-
-  isFireBlastPooling() {
-    return this.timeToCombustion <= 8 + Settings.FireMageFireBlastPoolAmount;
-  }
-// Improve Phoenix Flames pooling logic
-  // Replace the isPhoenixFlamesPooling method with a simpler version
-isPhoenixFlamesPooling() {
-  // Don't pool if we have Phoenix Reborn active
-  if (this.hasPhoenixRebornActive()) {
-    return false;
+    return this.hasTalent(SPELLS.FIRESTARTER) && target && target.pctHealth > 90;
   }
   
-  // Very basic pooling logic - only pool when Combustion is coming up soon
-  // and we have the Sun King's Blessing talent
-  return this.timeToCombustion <= 5 && this.hasTalent('Sun King\'s Blessing');
-}
-
-  isScorchExecutePhase() {
-    const target = this.getCurrentTarget();
-    return target && target.pctHealth <= 30;
+  // Safe cooldown check that first verifies the spell is known
+  getSpellCooldown(spellId) {
+    if (!this.hasSpell(spellId)) {
+      return { timeleft: 9999, ready: false };
+    }
+    return Spell.getCooldown(spellId);
   }
 
-  enemyCount(range = 8) {
+  getGcdRemains() {
+    return Spell.isGlobalCooldown() ? 1.5 - (wow.frameTime - Spell.getSpell(SPELLS.FIREBALL)._lastCastTimes) / 1000 : 0;
+  }
+
+  lastGcdWas(spellName) {
+    return Spell.getLastSuccessfulSpell() === spellName;
+  }
+
+  hotStreakSpellsInFlight() {
+    // In practice, this is hard to track precisely. We'll use 0 as a safe default
+    return 0;
+  }
+
+  enemiesAroundTarget(range) {
+    const target = this.getCurrentTarget();
+    return target ? target.getUnitsAroundCount(range) : 0;
+  }
+
+  getEnemiesInRange(range) {
     return me.getUnitsAroundCount(range);
   }
 
-  fightRemains() {
-    // In real implementation, this would use more sophisticated logic
-    return 300; // Default to 5 minutes
+  getAuraRemainingTime(spellId) {
+    const aura = me.getAura(spellId);
+    return aura ? aura.remaining / 1000 : 0;
   }
 
-  hasTalent(talentName) {
-    // This is a simplified implementation since we don't have direct access
-    // to the talent tree in this framework
-    // In a real implementation, would check actual talents
-    return true;
+  getDebuffRemainingTime(debuffName) {
+    const target = this.getCurrentTarget();
+    if (!target) return 0;
+    
+    const debuff = target.getAuraByMe(debuffName);
+    return debuff ? debuff.remaining / 1000 : 0;
   }
 
-  // Add specific Phoenix Reborn tracking method
-  hasPhoenixRebornActive() {
-    return me.hasAura(auras.phoenixReborn) || me.hasAura(auras.phoenixRebornBurn);
-  }
-
-  // First, add this to your FireMageSunfuryBehavior class
-usePhoenixFlames() {
-  return spell.cast('Phoenix Flames', this.getCurrentTarget, () => {
-    // Basic requirements to cast
-    const hasCharges = spell.getCooldown('Phoenix Flames').charges > 0;
-    const notOnGCD = !spell.isGlobalCooldown();
-    
-    // Check Phoenix Reborn status
-    const phoenixRebornActive = this.hasPhoenixRebornActive();
-    
-    // Pooling check (simplify to make sure it's not blocking casts)
-    const shouldPool = this.timeToCombustion <= 5 && 
-                      !phoenixRebornActive && 
-                      this.hasTalent('Sun King\'s Blessing');
-    
-    // Debug output to help identify the issue
-    // console.debug(`Phoenix Flames status: Has charges: ${hasCharges}, Not on GCD: ${notOnGCD}, Phoenix Reborn: ${phoenixRebornActive}, Pooling: ${shouldPool}`);
-    
-    // Simplified condition: cast if we have charges and either we have Phoenix Reborn active or we're not pooling
-    return hasCharges && notOnGCD && (phoenixRebornActive || !shouldPool);
-  });
-}
-
-/**
- * Gets the remaining time on the Improved Scorch debuff on the current target.
- * 
- * @returns {number} - The remaining time in milliseconds, or 0 if no debuff is present.
- */
-improviedScorchDebuffRemains() {
-  const target = this.getCurrentTarget();
-  if (!target) return 0;
-  
-  const debuff = target.hasAuraByMe(auras.improvedScorch);
-  // console.debug('Debuff found ' + target.hasAuraByMe(auras.improvedScorch));
-  return debuff ? debuff.remaining : 0;
-}
-
-// Helper method to check if we have a valid Hot Streak or Hyperthermia proc
-hasHotStreakProc() {
-  // Check both auras directly
-  return me.hasAura(auras.hotStreak) || me.hasAura(auras.hyperthermia);
-}
-wasLastSpell() {
-    let lastSpell = spell.getLastSuccessfulSpell();
-    return lastSpell;
-  }
-
-  debugFunction(){
-    if(!me.isCastingOrChanneling){
-      console.debug('Not Casting');
+  getCurrentTarget() {
+    const targetPredicate = unit => Common.validTarget(unit) && me.isFacing(unit);
+    const target = me.target;
+    if (target !== null && targetPredicate(target)) {
+      return target;
     }
-    let currentSpellName = spell.getSpell(me.currentCast).name;
-    console.debug("In Cast : " + currentSpellName);
+    return combat.targets.find(targetPredicate) || null;
   }
 }

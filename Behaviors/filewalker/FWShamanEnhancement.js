@@ -211,7 +211,7 @@ export class EnhancementShamanNewBehavior extends Behavior {
   }
   
   isOpeningPhase() {
-    return CombatTimer.getCombatStartTime() < 15000;
+    return CombatTimer.getCombatStartTime() < 20000;
   }
   
   // Defensive rotation
@@ -890,16 +890,45 @@ export class EnhancementShamanNewBehavior extends Behavior {
         me.getAuraStacks('Arc Discharge') > 1
       ),
       
-      // Core rotational abilities
-      spell.cast('Lava Lash', this.getCurrentTarget, req =>
-        me.hasAura('Hot Hand')
-      ),
+      spell.cast("Lava Lash", () => (me.hasAura("Hot Hand") && (me.getAuraStacks("Ashen Catalyst") === me.getMaxAuraStacks("Ashen Catalyst"))) || 
+        (this.getCurrentTarget().getAura("Flame Shock") && this.getCurrentTarget().getAura("Flame Shock").remaining <= 2 && !this.hasTalent("Voltaic Blaze")) || 
+        (this.hasTalent("Lashing Flames") && (!this.getCurrentTarget().hasAura("Lashing Flames")))),
       
-      spell.cast('Stormstrike', this.getCurrentTarget, req =>
-        me.hasAura('Doom Winds') || me.getAuraStacks('Stormblast') > 0
-      ),
+      spell.cast("Crash Lightning", () => (me.hasAura("Doom Winds") && me.getAuraStacks("Electrostatic Wager") > 1) || me.getAuraStacks("Electrostatic Wager") > 8),
       
-      spell.cast('Windstrike', this.getCurrentTarget),
+      spell.cast("Stormstrike", () => me.hasAura("Doom Winds") || me.getAuraStacks("Stormblast") > 0),
+      
+      spell.cast("Crash Lightning", () => this.hasTalent("Unrelenting Storms") && this.hasTalent("Alpha Wolf") && this.alphaWolfMinRemains() === 0),
+      
+      spell.cast("Lava Lash", () => me.hasAura("Hot Hand")),
+      
+      spell.cast("Crash Lightning", () => this.hasSetBonus("tww2_4pc")),
+      
+      spell.cast("Voltaic Blaze"),
+      
+      spell.cast("Stormstrike"),
+      
+      spell.cast("Lava Lash", () => this.hasTalent("Elemental Assault") && this.hasTalent("Molten Assault") && this.getCurrentTarget().hasAuraByMe("Flame Shock")),
+      
+      spell.cast("Ice Strike"),
+      
+      spell.cast("Lightning Bolt", () => me.getAuraStacks("Maelstrom Weapon") >= 5 && !me.hasAura("Primordial Storm")),
+      
+      spell.cast("Frost Shock", () => me.hasAura("Hailstorm")),
+      
+      spell.cast("Flame Shock", () => !this.getCurrentTarget().hasAuraByMe("Flame Shock")),
+      
+      spell.cast("Sundering"),
+      
+      spell.cast("Crash Lightning"),
+      
+      spell.cast("Frost Shock"),
+      
+      spell.cast("Fire Nova", () => this.getCurrentTarget().hasAuraByMe("Flame Shock")),
+      
+      spell.cast("Earth Elemental"),
+      
+      spell.cast("Flame Shock"),
       
       // Standard abilities
       this.standardSingleTargetAbilities()
