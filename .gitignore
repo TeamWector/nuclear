@@ -4,3 +4,10 @@
 
 /.vs
 Extra/AutoFisher.js
+.idea/aws.xml
+.idea/checkstyle-idea.xml
+.idea/misc.xml
+.idea/modules.xml
+.idea/nuclear.iml
+.idea/vcs.xml
+.idea/codeStyles/codeStyleConfig.xml

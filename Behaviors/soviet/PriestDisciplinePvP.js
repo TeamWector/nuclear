@@ -78,7 +78,7 @@ export class PriestDisciplinePvP extends Behavior {
       spell.cast("Premonition", on => me, ret => this.shouldCastPremonition(this.healTarget)),
       spell.cast("Evangelism", on => me, ret => me.inCombat() && (
         (this.getAtonementCount() > 3 && this.minAtonementDuration() < 4000)
-        || this.healTarget.effectiveHealthPercent < 40)
+        || (this.healTarget && this.healTarget.effectiveHealthPercent < 40))
       ),
       spell.cast("Shadow Word: Death", on => this.findDeathThePolyTarget(), ret => this.findDeathThePolyTarget() !== undefined),
       spell.cast("Power Word: Barrier", on => this.healTarget, ret => this.shouldCastWithHealthAndNotPainSupp(this.healTarget, 45)),
@@ -215,3 +215,4 @@ export class PriestDisciplinePvP extends Behavior {
     return minDuration === Infinity ? 0 : minDuration;
   }
 }
+

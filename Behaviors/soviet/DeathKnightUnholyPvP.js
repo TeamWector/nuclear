@@ -15,6 +15,7 @@ const auras = {
   deathAndDecay: 188290,
   suddenDoom: 81340,
   virulentPlague: 191587,
+  darkTransform: 63560
 }
 
 export class DeathKnightUnholy extends Behavior {
@@ -28,7 +29,10 @@ export class DeathKnightUnholy extends Behavior {
       common.waitForNotMounted(),
       common.waitForCastOrChannel(),
       common.waitForTarget(),
-      spell.interrupt("Leap", true),
+      new bt.Decorator(
+        ret => me.pet && me.pet.hasVisibleAura(auras.darkTransform),
+        spell.interrupt("Leap", true)
+      ),
       spell.interrupt("Gnaw", true),
       common.waitForFacing(),
       spell.cast("Raise Dead", on => me, req => !Pet.current),

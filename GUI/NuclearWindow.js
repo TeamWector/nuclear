@@ -6,6 +6,7 @@ import Radar from "@/Extra/Radar";
 import General from "@/Extra/General";
 import ProfileSettings from "@/Extra/ProfileSettings";
 import SpellQueueDisplay from "@/Extra/SpellQueueDisplay";
+import PVP from "@/Extra/PVP";
 import nuclear from "@/nuclear";
 import { me } from "@/Core/ObjectManager";
 import KeyBinding from "@/Core/KeyBinding";
@@ -13,7 +14,7 @@ import KeyBinding from "@/Core/KeyBinding";
 class NuclearWindow {
   constructor() {
     this.show = new imgui.MutableVariable(false);
-    this.modules = [General, Radar, Autolooter, AntiAFK, ProfileSettings, SpellQueueDisplay]; // Added SpellQueueDisplay
+    this.modules = [General, Radar, Autolooter, AntiAFK, ProfileSettings, SpellQueueDisplay, PVP]; // Added PVP
     this.initialized = false;
     // Initialize state for each option from Settings
     this.state = {};

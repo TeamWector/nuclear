@@ -35,5 +35,6 @@ declare namespace wow {
     isHealImmune(): boolean;
     isWithinMeleeRange(target: CGUnit): boolean;
     isSlowed(): boolean;
+    isHealer(): boolean;
   }
 }

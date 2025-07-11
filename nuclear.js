@@ -9,8 +9,15 @@ import commandListener from '@/Core/CommandListener'
 import { renderBehaviorTree } from "./Debug/BehaviorTreeDebug";
 import settings from "@/Core/Settings";
 import KeyBinding from "@/Core/KeyBinding";
+import drTracker from "./Core/DRTracker";
+import cooldownTracker from "./Core/CooldownTracker";
 
 export let availableBehaviors = [];
+
+// Make drTracker globally accessible
+globalThis.drTracker = drTracker;
+// Make cooldownTracker globally accessible
+globalThis.cooldownTracker = cooldownTracker;
 
 class Nuclear extends wow.EventListener {
   async initialize() {
@@ -18,6 +25,12 @@ class Nuclear extends wow.EventListener {
     await this.builder.initialize();
     this.rebuild();
     this.isPaused = false;
+
+    // Initialize DR tracker
+    drTracker.initialize();
+
+    // Initialize cooldown tracker
+    cooldownTracker.initialize();
 
     // Set default keybinding for pause (Something noone will press)
     KeyBinding.setDefault("pause", imgui.Key.F9);
@@ -59,6 +72,8 @@ class Nuclear extends wow.EventListener {
     try {
       defaultHealTargeting?.update();
       defaultCombatTargeting?.update();
+      drTracker.update();
+      cooldownTracker.update();
       if (this.behaviorRoot && !this.isPaused) {
         this.behaviorRoot.execute(this.behaviorContext);
       }
