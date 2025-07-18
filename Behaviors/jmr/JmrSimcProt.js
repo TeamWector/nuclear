@@ -84,18 +84,18 @@ export class WarriorProtNewBehavior extends Behavior {
         const rageDeficit = 100 - rage;
         return (
           this.getCurrentTarget().pctHealth >= 20 && (
-            (rageDeficit <= 15 && spell.getCooldown("Shield Slam").ready) ||
-            (rageDeficit <= 40 && spell.getCooldown("Shield Charge").ready && this.hasTalent("Champion's Bulwark")) ||
-            (rageDeficit <= 20 && spell.getCooldown("Shield Charge").ready) ||
-            (rageDeficit <= 30 && spell.getCooldown("Demoralizing Shout").ready && this.hasTalent("Booming Voice")) ||
-            (rageDeficit <= 20 && spell.getCooldown("Avatar").ready) ||
-            (rageDeficit <= 45 && spell.getCooldown("Demoralizing Shout").ready && this.hasTalent("Booming Voice") && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus")) ||
-            (rageDeficit <= 30 && spell.getCooldown("Avatar").ready && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus")) ||
+            (rageDeficit <= 15 && spell.getCooldown("Shield Slam")?.ready) ||
+            (rageDeficit <= 40 && spell.getCooldown("Shield Charge")?.ready && this.hasTalent("Champion's Bulwark")) ||
+            (rageDeficit <= 20 && spell.getCooldown("Shield Charge")?.ready) ||
+            (rageDeficit <= 30 && spell.getCooldown("Demoralizing Shout")?.ready && this.hasTalent("Booming Voice")) ||
+            (rageDeficit <= 20 && spell.getCooldown("Avatar")?.ready) ||
+            (rageDeficit <= 45 && spell.getCooldown("Demoralizing Shout")?.ready && this.hasTalent("Booming Voice") && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus")) ||
+            (rageDeficit <= 30 && spell.getCooldown("Avatar")?.ready && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus")) ||
             rageDeficit <= 20 ||
-            (rageDeficit <= 40 && spell.getCooldown("Shield Slam").ready && me.hasAura("Violent Outburst") && this.hasTalent("Heavy Repercussions") && this.hasTalent("Impenetrable Wall")) ||
-            (rageDeficit <= 55 && spell.getCooldown("Shield Slam").ready && me.hasAura("Violent Outburst") && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus") && this.hasTalent("Heavy Repercussions") && this.hasTalent("Impenetrable Wall")) ||
-            (rageDeficit <= 17 && spell.getCooldown("Shield Slam").ready && this.hasTalent("Heavy Repercussions")) ||
-            (rageDeficit <= 18 && spell.getCooldown("Shield Slam").ready && this.hasTalent("Impenetrable Wall"))
+            (rageDeficit <= 40 && spell.getCooldown("Shield Slam")?.ready && me.hasAura("Violent Outburst") && this.hasTalent("Heavy Repercussions") && this.hasTalent("Impenetrable Wall")) ||
+            (rageDeficit <= 55 && spell.getCooldown("Shield Slam")?.ready && me.hasAura("Violent Outburst") && me.hasAura("Last Stand") && this.hasTalent("Unnerving Focus") && this.hasTalent("Heavy Repercussions") && this.hasTalent("Impenetrable Wall")) ||
+            (rageDeficit <= 17 && spell.getCooldown("Shield Slam")?.ready && this.hasTalent("Heavy Repercussions")) ||
+            (rageDeficit <= 18 && spell.getCooldown("Shield Slam")?.ready && this.hasTalent("Impenetrable Wall"))
           ) ||
           ((rage >= 70 || (me.getAuraStacks("Seeing Red") === 7 && rage >= 35)) &&
            spell.getCooldown("Shield Slam").remaining <= 1 &&
@@ -136,7 +136,7 @@ export class WarriorProtNewBehavior extends Behavior {
       // actions.generic+=/shield_slam,if=(buff.burst_of_power.stack=2&buff.thunder_blast.stack<=1|buff.violent_outburst.up)|rage<=70&talent.demolish.enabled
       spell.cast("Shield Slam", on => this.getCurrentTarget(), req => (me.getAuraStacks("Burst of Power") === 2 && me.getAuraStacks("Thunder Blast") <= 1 || me.hasAura("Violent Outburst")) || me.powerByType(PowerType.Rage) <= 70 && this.hasTalent("Demolish")),
       // actions.generic+=/execute,if=rage>=70|(rage>=40&cooldown.shield_slam.remains&talent.demolish.enabled|rage>=50&cooldown.shield_slam.remains)|buff.sudden_death.up&talent.sudden_death.enabled
-      spell.cast("Execute", on => this.getCurrentTarget(), req => me.powerByType(PowerType.Rage) >= 70 || (me.powerByType(PowerType.Rage) >= 40 && !spell.getCooldown("Shield Slam").ready && this.hasTalent("Demolish")) || (me.powerByType(PowerType.Rage) >= 50 && !spell.getCooldown("Shield Slam").ready) || (me.hasAura("Sudden Death") && this.hasTalent("Sudden Death"))),
+      spell.cast("Execute", on => this.getCurrentTarget(), req => me.powerByType(PowerType.Rage) >= 70 || (me.powerByType(PowerType.Rage) >= 40 && !spell.getCooldown("Shield Slam")?.ready && this.hasTalent("Demolish")) || (me.powerByType(PowerType.Rage) >= 50 && !spell.getCooldown("Shield Slam")?.ready) || (me.hasAura("Sudden Death") && this.hasTalent("Sudden Death"))),
       // actions.generic+=/shield_slam
       spell.cast("Shield Slam", on => this.getCurrentTarget()),
       // actions.generic+=/thunder_blast,if=dot.rend.remains<=2&buff.violent_outburst.down
@@ -146,19 +146,19 @@ export class WarriorProtNewBehavior extends Behavior {
       // actions.generic+=/thunder_clap,if=dot.rend.remains<=2&buff.violent_outburst.down
       spell.cast("Thunder Clap", on => this.getCurrentTarget(), req => this.getDebuffRemainingTime("Rend") <= 2 && !me.hasAura("Violent Outburst")),
       // actions.generic+=/thunder_blast,if=(spell_targets.thunder_clap>1|cooldown.shield_slam.remains&!buff.violent_outburst.up)
-      spell.cast("Thunder Blast", on => this.getCurrentTarget(), req => this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam").ready && !me.hasAura("Violent Outburst")),
+      spell.cast("Thunder Blast", on => this.getCurrentTarget(), req => this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam")?.ready && !me.hasAura("Violent Outburst")),
       // actions.generic+=/thunder_clap,if=(spell_targets.thunder_clap>1|cooldown.shield_slam.remains&!buff.violent_outburst.up)
-      spell.cast("Thunder Clap", on => this.getCurrentTarget(), req => this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam").ready && !me.hasAura("Violent Outburst")),
+      spell.cast("Thunder Clap", on => this.getCurrentTarget(), req => this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam")?.ready && !me.hasAura("Violent Outburst")),
       // actions.generic+=/revenge,if=(rage>=80&target.pctHealth>20|buff.revenge.up&target.pctHealth<=20&rage<=18&cooldown.shield_slam.remains|buff.revenge.up&target.pctHealth>20)|(rage>=80&target.pctHealth>35|buff.revenge.up&target.pctHealth<=35&rage<=18&cooldown.shield_slam.remains|buff.revenge.up&target.pctHealth>35)&talent.massacre.enabled
-      spell.cast("Revenge", on => this.getCurrentTarget(), req => (me.powerByType(PowerType.Rage) >= 80 && this.getCurrentTarget().pctHealth > 20 || me.hasVisibleAura("Revenge") && this.getCurrentTarget().pctHealth <= 20 && me.powerByType(PowerType.Rage) <= 18 && !spell.getCooldown("Shield Slam").ready || me.hasVisibleAura("Revenge") && this.getCurrentTarget().pctHealth > 20) || (me.powerByType(PowerType.Rage) >= 80 && this.getCurrentTarget().pctHealth > 35 || me.hasAura("Revenge") && this.getCurrentTarget().pctHealth <= 35 && me.powerByType(PowerType.Rage) <= 18 && !spell.getCooldown("Shield Slam").ready || me.hasAura("Revenge") && this.getCurrentTarget().pctHealth > 35 && this.hasTalent("Massacre"))),
+      spell.cast("Revenge", on => this.getCurrentTarget(), req => (me.powerByType(PowerType.Rage) >= 80 && this.getCurrentTarget().pctHealth > 20 || me.hasVisibleAura("Revenge") && this.getCurrentTarget().pctHealth <= 20 && me.powerByType(PowerType.Rage) <= 18 && !spell.getCooldown("Shield Slam")?.ready || me.hasVisibleAura("Revenge") && this.getCurrentTarget().pctHealth > 20) || (me.powerByType(PowerType.Rage) >= 80 && this.getCurrentTarget().pctHealth > 35 || me.hasAura("Revenge") && this.getCurrentTarget().pctHealth <= 35 && me.powerByType(PowerType.Rage) <= 18 && !spell.getCooldown("Shield Slam")?.ready || me.hasAura("Revenge") && this.getCurrentTarget().pctHealth > 35 && this.hasTalent("Massacre"))),
       // actions.generic+=/execute
       spell.cast("Execute", on => this.getCurrentTarget()),
       // actions.generic+=/revenge,if=target.health>20
       spell.cast("Revenge", on => this.getCurrentTarget()),
       // actions.generic+=/thunder_blast,if=(spell_targets.thunder_clap>=1|cooldown.shield_slam.remains&buff.violent_outburst.up)
-      spell.cast("Thunder Blast", on => this.getCurrentTarget(), req => (this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam").ready && me.hasAura("Violent Outburst"))),
+      spell.cast("Thunder Blast", on => this.getCurrentTarget(), req => (this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam")?.ready && me.hasAura("Violent Outburst"))),
       // actions.generic+=/thunder_clap,if=(spell_targets.thunder_clap>=1|cooldown.shield_slam.remains&buff.violent_outburst.up)
-      spell.cast("Thunder Clap", on => this.getCurrentTarget(), req => (this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam").ready && me.hasAura("Violent Outburst"))),
+      spell.cast("Thunder Clap", on => this.getCurrentTarget(), req => (this.getEnemiesInRange(8) >= 1 || !spell.getCooldown("Shield Slam")?.ready && me.hasAura("Violent Outburst"))),
       // actions.generic+=/devastate
       spell.cast("Devastate", on => this.getCurrentTarget())
     );
@@ -178,10 +178,10 @@ export class WarriorProtNewBehavior extends Behavior {
     const rage = me.powerByType(PowerType.Rage);
     return (
       (rage >= 80 && target.pctHealth > 20) ||
-      (me.hasVisibleAura("Revenge") && target.pctHealth <= 20 && rage <= 18 && !spell.getCooldown("Shield Slam").ready) ||
+      (me.hasVisibleAura("Revenge") && target.pctHealth <= 20 && rage <= 18 && !spell.getCooldown("Shield Slam")?.ready) ||
       (me.hasVisibleAura("Revenge") && target.pctHealth > 20) ||
       (rage >= 80 && target.pctHealth > 35) ||
-      (me.hasVisibleAura("Revenge") && target.pctHealth <= 35 && rage <= 18 && !spell.getCooldown("Shield Slam").ready) ||
+      (me.hasVisibleAura("Revenge") && target.pctHealth <= 35 && rage <= 18 && !spell.getCooldown("Shield Slam")?.ready) ||
       (me.hasVisibleAura("Revenge") && target.pctHealth > 35 && this.hasTalent("Massacre"))
     );
   }

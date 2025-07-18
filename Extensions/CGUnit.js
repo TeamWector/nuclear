@@ -1,7 +1,7 @@
 import objMgr, { me } from "@/Core/ObjectManager";
 import Common from "@/Core/Common";
 import { MovementFlags, TraceLineHitFlags, UnitFlags, UnitStandStateType } from "@/Enums/Flags";
-import { HealImmune } from "@/Enums/Auras";
+import { HealImmune, PVPImmuneToCC } from "@/Enums/Auras";
 import Settings from "@/Core/Settings";
 import { rootExclusions } from "@/Data/Exclusions";
 
@@ -152,7 +152,7 @@ Object.defineProperties(wow.CGUnit.prototype, {
      */
     value: function () {
       // Check if `this.type` is either 6 (player) or 7 (active player)
-      return this.type === wow.ObjectTypeID.Player || this.type === wow.ObjectTypeID.ActivePlayer;
+      return this && (this.type && (this.type === 6 || this.type === 7));
     }
   },
 
@@ -640,6 +640,32 @@ Object.defineProperties(wow.CGUnit.prototype, {
       return Object.values(HealImmune).some(immune => this.hasAura(immune));
     }
   },
+
+  canCC: {
+    /**
+     * Check if the unit can be crowd controlled (CC'd).
+     * Only players can be CC'd, and only if they don't have PVP immunity auras.
+     * @returns {boolean} - Returns true if the unit can be CC'd, false otherwise.
+     */
+    value: function () {
+      // Only players can be CC'd
+      if (!this.isPlayer()) {
+        return false;
+      }
+
+      // Get the set of immunity spell IDs for efficient lookup
+      const immunitySpellIds = new Set(Object.values(PVPImmuneToCC));
+
+      // Check if the player has any PVP immunity auras - if they do, they can't be CC'd
+      const immunityAura = this.auras.find(aura => immunitySpellIds.has(aura.spellId));
+      if (immunityAura) {
+        // console.log(`[canCC] ${this.name} has CC immunity aura: ${immunityAura.name} (${immunityAura.spellId})`);
+        return false;
+      }
+
+      return true;
+    }
+  },
     /**
   // isWithinMeleeRange: {
 
@@ -653,6 +679,139 @@ Object.defineProperties(wow.CGUnit.prototype, {
   //     return meleeSpell.inRange(target);
   //   }
   // },
+
+  /**
+   * Get DR stacks for a specific spell on this unit
+   * @param {number} spellId - The spell ID to check DR for
+   * @returns {number} - Number of DR stacks (0-3, where 3 = immune)
+   */
+  getDRStacks: {
+    value: function(spellId) {
+      // Access drTracker from global scope (imported in nuclear.js)
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.getDRStacksBySpell(this.guid, spellId);
+      }
+      return 0;
+    }
+  },
+
+  /**
+   * Check if this unit would be diminished by a spell
+   * @param {number} spellId - The spell ID to check
+   * @returns {boolean} - True if the spell would be diminished
+   */
+  wouldBeDiminished: {
+    value: function(spellId) {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.wouldBeDiminished(this.guid, spellId);
+      }
+      return false;
+    }
+  },
+
+  /**
+   * Check if this unit is immune to a spell
+   * @param {number} spellId - The spell ID to check
+   * @returns {boolean} - True if the unit is immune to this spell
+   */
+  isImmuneToSpell: {
+    value: function(spellId) {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.isImmune(this.guid, spellId);
+      }
+      return false;
+    }
+  },
+
+  /**
+   * Get the diminished duration multiplier for a spell on this unit
+   * @param {number} spellId - The spell ID to check
+   * @returns {number} - Duration multiplier (1.0 = full, 0.5 = half, 0.25 = quarter, 0 = immune)
+   */
+  getDiminishedMultiplier: {
+    value: function(spellId) {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.getDiminishedMultiplier(this.guid, spellId);
+      }
+      return 1.0;
+    }
+  },
+
+  /**
+   * Check if this unit is currently CCd (crowd controlled)
+   * @returns {boolean} - True if the unit is currently under any CC effect
+   */
+  isCCd: {
+    value: function() {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.isCCd(this.guid);
+      }
+      return false;
+    }
+  },
+
+  /**
+   * Check if this unit is CCd by a specific category
+   * @param {string} category - The DR category to check
+   * @returns {boolean} - True if the unit is CCd by this category
+   */
+  isCCdByCategory: {
+    value: function(category) {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.isCCdByCategory(this.guid, category);
+      }
+      return false;
+    }
+  },
+
+  /**
+   * Get DR stacks for a specific category on this unit
+   * @param {string} category - The DR category to check
+   * @returns {number} - Number of DR stacks (0-3, where 3 = immune)
+   */
+  getDR: {
+    value: function(category) {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.getDRStacks(this.guid, category);
+      }
+      return 0;
+    }
+  },
+
+  /**
+   * Get all active CCs on this unit
+   * @returns {Object} - Object containing active CCs { spellId: { category, appliedTime } }
+   */
+  getActiveCCs: {
+    value: function() {
+      if (typeof drTracker !== 'undefined') {
+        return drTracker.getActiveCCs(this.guid);
+      }
+      return {};
+    }
+  },
+
+  isHealer: {
+    /**
+     * Check if the unit is a healer based on their specialization auras.
+     * @returns {boolean} - Returns true if the unit has any healing specialization aura.
+     */
+    value: function() {
+      const healerSpecs = [
+        'Preservation Evoker',
+        'Restoration Druid',
+        'Discipline Priest',
+        'Holy Priest',
+        'Mistweaver Monk',
+        'Holy Paladin',
+        'Restoration Shaman'
+      ];
+
+      return this.auras.some(aura =>
+        aura && aura.name && healerSpecs.includes(aura.name)
+      );
+    }
+  }
 
 });
 

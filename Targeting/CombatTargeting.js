@@ -45,7 +45,7 @@ class CombatTargeting extends Targeting {
       /** @type {wow.CGUnit} */
       const unit = obj;
       if (!unit.isAttackable) { return false; }
-      if (unit.isDeadOrGhost || unit.health <= 1) { return false; }
+      if (unit.deadOrGhost || unit.health <= 1) { return false; }
       if (unit.distanceTo(me) >= 40) { return false; }
       if (unit.isImmune()) { return false; }
       if (unit === me.target && Settings.AttackOOC) { return true; }
