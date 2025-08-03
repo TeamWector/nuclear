@@ -118,12 +118,7 @@ export class PriestDisciplinePvP extends Behavior {
         common.waitForCastOrChannel(),
         this.waitForNotJustCastPenitence(),
 
-        spell.cast("Psychic Scream", on => this.psychicScreamTarget(), ret => this.psychicScreamTarget() !== undefined,
-        (ret) => {
-          if (ret === bt.Status.Success) {
-            toastError("Psychic Scream Fear!", 1.2, 2500);
-          }
-        }),
+        spell.cast("Psychic Scream", on => this.psychicScreamTarget(), ret => this.psychicScreamTarget() !== undefined),
 
         // Healing rotation (doesn't need enemy target/facing)
         this.healRotation(),
@@ -457,7 +452,7 @@ export class PriestDisciplinePvP extends Behavior {
       const enemyTracking = this.enemyCCTracker.get(guidKey);
 
       // Priest Psychic Scream prediction
-      if (enemy.classType === 5 && me.distanceTo(enemy) <= 8) { // Class 5 = Priest
+      if (me.distanceTo(enemy) <= 8) {
         const lastPsychicScream = enemyTracking ? enemyTracking[8122] : null;
         const timeSinceLastUse = lastPsychicScream ? currentTime - lastPsychicScream : 999999;
         
@@ -468,7 +463,7 @@ export class PriestDisciplinePvP extends Behavior {
       }
 
       // Rogue CC prediction  
-      if (enemy.classType === 4 && me.distanceTo(enemy) <= 4) { // Class 4 = Rogue
+      if (enemy.powerType === 3 && me.distanceTo(enemy) <= 4) {
         const lastCheapShot = enemyTracking ? enemyTracking[1833] : null;
         const lastKidneyShot = enemyTracking ? enemyTracking[408] : null;
         
@@ -526,37 +521,16 @@ export class PriestDisciplinePvP extends Behavior {
       }),
       spell.cast("Power Word: Life", on => this.healTarget, ret => this.healTarget?.effectiveHealthPercent < 50),
       spell.cast("Desperate Prayer", on => me, ret => me.effectiveHealthPercent < 40),
-      spell.cast("Pain Suppression", on => this.healTarget, ret => this.shouldUsePainSuppression(this.healTarget),
-      (ret) => {
-        if (ret === bt.Status.Success) {
-          toastSuccess(`Pain Suppression → ${this.healTarget?.unsafeName || 'Target'}!`, 1.3, 3000);
-        }
-      }),
-      spell.cast("Void Shift", on => this.healTarget, ret => this.shouldUseVoidShift(this.healTarget),
-      (ret) => {
-        if (ret === bt.Status.Success) {
-          toastWarning(`Void Shift → ${this.healTarget?.unsafeName || 'Target'}!`, 1.2, 3000);
-        }
-      }),
-      spell.cast("Mass Dispel", on => this.findMassDispelTarget(), ret => this.findMassDispelTarget() !== undefined,
-      (ret) => {
-        if (ret === bt.Status.Success) {
-          const target = this.findMassDispelTarget();
-          toastInfo(`Mass Dispel → ${target?.unsafeName || 'Target'}`, 1.1, 2000);
-        }
-      }),
+      spell.cast("Pain Suppression", on => this.healTarget, ret => this.shouldUsePainSuppression(this.healTarget)),
+      spell.cast("Void Shift", on => this.healTarget, ret => this.shouldUseVoidShift(this.healTarget)),
+      spell.cast("Mass Dispel", on => this.findMassDispelTarget(), ret => this.findMassDispelTarget() !== undefined),
       spell.cast("Premonition", on => me, ret => this.shouldCastPremonition(this.healTarget)),
       spell.cast("Evangelism", on => me, ret => me.inCombat() && (
         (this.getAtonementCount() > 3 && this.minAtonementDuration() < 4000)
         || (this.healTarget && this.healTarget.hasAura(auras.atonement) && this.healTarget.effectiveHealthPercent < 40))
       ),
       this.noFacingSpellsImportant(),
-      spell.cast("Power Word: Barrier", on => this.healTarget, ret => this.shouldUseBarrier(this.healTarget),
-      (ret) => {
-        if (ret === bt.Status.Success) {
-          toastSuccess("Power Word: Barrier!", 1.2, 2500);
-        }
-      }),
+      spell.cast("Power Word: Barrier", on => this.healTarget, ret => this.shouldUseBarrier(this.healTarget)),
       spell.cast("Power Word: Shield", on => this.healTarget, ret => this.healTarget?.effectiveHealthPercent < 89 && !this.hasShield(this.healTarget)),
       spell.cast("Power Word: Radiance", on => this.healTarget, ret => this.shouldCastRadiance(this.healTarget, 2)),
       spell.cast("Flash Heal", on => this.healTarget, ret => this.healTarget?.effectiveHealthPercent < 85 && me.hasAura(auras.surgeOfLight)),
