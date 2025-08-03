@@ -530,11 +530,7 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       // Interrupts
       new bt.Decorator(
         () => Settings.UseCounterShot && this.overlayToggles.interrupts.value && this.overlayToggles.counterShot.value,
-        spell.interrupt("Counter Shot", ret => {
-          if (ret === bt.Status.Success) {
-            toastWarning("Counter Shot Interrupt!", 1.1, 2000);
-          }
-        })
+        spell.interrupt("Counter Shot")
       ),
       // Intimidation interrupt (doesn't require facing)
       new bt.Decorator(
@@ -590,12 +586,8 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       spell.cast("Bestial Wrath", () => 
         Settings.UseBestialWrath && 
         this.overlayToggles.bestialWrath.value &&
-        this.shouldUseCooldowns(),
-      ret => {
-        if (ret === bt.Status.Success) {
-          toastSuccess("BESTIAL WRATH ACTIVATED!", 1.3, 2000);
-        }
-      }),
+        this.shouldUseCooldowns()
+      ),
       
       // barbed_shot,target_if=min:dot.barbed_shot.remains,if=full_recharge_time<gcd|charges_fractional>=cooldown.kill_command.charges_fractional|talent.call_of_the_wild&cooldown.call_of_the_wild.ready|howl_summon_ready&full_recharge_time<8
       spell.cast("Barbed Shot", on => this.getTargetWithMinBarbedShot(), req => 
@@ -620,23 +612,15 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       spell.cast("Call of the Wild", () => 
         Settings.UseCallOfTheWild && 
         this.overlayToggles.callOfTheWild.value &&
-        this.shouldUseCooldowns(),
-      ret => {
-        if (ret === bt.Status.Success) {
-          toastSuccess("Call of the Wild!", 1.2, 2500);
-        }
-      }),
+        this.shouldUseCooldowns()
+      ),
       
       // bloodshed
       spell.cast("Bloodshed", () => 
         Settings.UseBloodshed && 
         this.overlayToggles.bloodshed.value &&
-        this.shouldUseCooldowns(),
-      ret => {
-        if (ret === bt.Status.Success) {
-          toastSuccess("Bloodshed!", 1.1, 2000);
-        }
-      }),
+        this.shouldUseCooldowns()
+      ),
       
       // dire_beast,if=talent.shadow_hounds|talent.dire_cleave
       spell.cast("Dire Beast", () => 
@@ -819,24 +803,14 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       spell.cast("Binding Shot", on => this.findBindingShotTargetPVP(), req => 
         Settings.UseBinding &&
         this.overlayToggles.binding.value &&
-        this.findBindingShotTargetPVP() !== null,
-      ret => {
-        if (ret === bt.Status.Success) {
-          const target = this.findBindingShotTargetPVP();
-          toastWarning(`Binding Shot → ${target?.unsafeName || 'Target'}!`, 1.1, 2500);
-        }
-      }),
+        this.findBindingShotTargetPVP() !== null
+      ),
       
       // Freezing Trap enemy healer when stunned with <1.5s stun remaining
       spell.cast("Freezing Trap", on => this.findFreezingTrapTargetPVP(), req => 
         Settings.UseFreezingTrap &&
-        this.findFreezingTrapTargetPVP() !== null,
-      ret => {
-        if (ret === bt.Status.Success) {
-          const target = this.findFreezingTrapTargetPVP();
-          toastError(`Freezing Trap → ${target?.unsafeName || 'Target'}!`, 1.2, 3000);
-        }
-      }),
+        this.findFreezingTrapTargetPVP() !== null
+      ),
       
       // Tar Trap any enemy within 10y of us
       spell.cast("Tar Trap", on => this.findTarTrapLocationPVP(), req => 
@@ -854,13 +828,8 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       spell.cast("Intimidation", on => this.findIntimidationTargetPVP(), req => 
         Settings.UseIntimidation &&
         this.overlayToggles.intimidation.value &&
-        this.findIntimidationTargetPVP() !== null,
-      ret => {
-        if (ret === bt.Status.Success) {
-          const target = this.findIntimidationTargetPVP();
-          toastError(`Intimidation Stun → ${target?.unsafeName || 'Target'}!`, 1.2, 3000);
-        }
-      }),
+        this.findIntimidationTargetPVP() !== null
+      ),
       
       // Bursting Shot non-healers within 8y of us
       spell.cast("Bursting Shot", on => this.findBurstingShotTargetPVP(), req => 
@@ -918,24 +887,15 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       spell.cast("Bestial Wrath", () => 
         Settings.UseBestialWrath && 
         this.overlayToggles.bestialWrath.value &&
-        this.burstModeActive,
-      ret => {
-        if (ret === bt.Status.Success) {
-          toastSuccess("BESTIAL WRATH ACTIVATED!", 1.3, 2000);
-        }
-      }),
+        this.burstModeActive
+      ),
       
       // Chimaeral Sting enemy healer during Bestial Wrath (when not CC'd)
       spell.cast("Chimaeral Sting", on => this.findEnemyHealerNotCC(), req => 
         this.overlayToggles.chimaeralSting.value &&
         me.hasVisibleAura("Bestial Wrath") &&
-        this.findEnemyHealerNotCC() !== null,
-      ret => {
-        if (ret === bt.Status.Success) {
-          const target = this.findEnemyHealerNotCC();
-          toastWarning(`Chimaeral Sting → ${target?.unsafeName || 'Healer'}!`, 1.2, 3000);
-        }
-      }),
+        this.findEnemyHealerNotCC() !== null
+      ),
       
       // Bloodshed
       spell.cast("Bloodshed", () => 
@@ -1449,7 +1409,6 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
       // Check if Freezing Trap is ready first (using same pattern as line 1270)
       const freezingTrapSpell = spell.getSpell(187650);
       if (!freezingTrapSpell || !freezingTrapSpell.isUsable || !freezingTrapSpell.cooldown.ready) {
-        toastWarning("Freezing Trap not ready!", 1.0, 2000);
         return;
       }
 
@@ -1500,21 +1459,14 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
           if (freezingTrapSpell) {
             console.log(`Casting Freezing Trap (ID: 187650) on ${actualTarget.unsafeName}`);
             spell.castPrimitive(freezingTrapSpell, actualTarget);
-            toastSuccess(`Freezing Trap - ${targetType}!`, 1.2, 3000);
             console.log(`Successfully cast Freezing Trap on ${targetType}`);
           } else {
             console.log("Freezing Trap spell object not found");
-            toastError("Freezing Trap spell not found!", 1.0, 2000);
           }
-        } else {
-          toastWarning("Target became invalid", 1.0, 2000);
         }
-      } else {
-        toastInfo("No valid Freezing Trap target", 1.0, 2000);
       }
     } catch (error) {
       console.error("Error casting manual Freezing Trap:", error);
-      toastError("Freezing Trap error!", 1.0, 2000);
     }
   }
 
