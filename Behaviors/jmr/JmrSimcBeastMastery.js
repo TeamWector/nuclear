@@ -3,7 +3,7 @@ import * as bt from '@/Core/BehaviorTree';
 import Specialization from '@/Enums/Specialization';
 import common from '@/Core/Common';
 import spell from "@/Core/Spell";
-import { me } from "@/Core/ObjectManager";
+import objMgr, { me } from "@/Core/ObjectManager";
 import { PowerType } from "@/Enums/PowerType";
 import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 import Settings from "@/Core/Settings";
@@ -253,6 +253,82 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
 
     const windowTitle = Settings.EnablePVPRotation ? "Beast Mastery PVP Controls" : "Beast Mastery Controls";
     if (imgui.begin(windowTitle, this.overlayToggles.showOverlay, windowFlags)) {
+
+      // Pet Info
+      // if (imgui.collapsingHeader("Pet Info", imgui.TreeNodeFlags.DefaultOpen)) {
+      //   imgui.indent();
+      //   const pet = me.pet;
+      //   if (pet) {
+      //     const petName = pet.unsafeName || "Unknown Pet";
+      //     const petHealth = pet.pctHealth || 0;
+      //     //imgui.textColored({ r: 0.2, g: 1.0, b: 0.2, a: 1.0 }, `Pet: ${petName} (${petHealth.toFixed(0)}%)`);
+      //     const beastCleaveStacks = pet.getAuraStacks ? pet.getAuraStacks("Beast Cleave") || 0 : 0;
+      //     if (beastCleaveStacks > 0) {
+      //       imgui.textColored({ r: 1.0, g: 1.0, b: 0.2, a: 1.0 }, `Beast Cleave: ${beastCleaveStacks}`);
+      //     }
+      //   } else {
+      //     imgui.textColored({ r: 1.0, g: 0.2, b: 0.2, a: 1.0 }, "No Pet Active");
+      //   }
+
+        // Pet testing code - commented out for now
+        /*
+        // Enhanced pet-to-player linking test using objMgr.objects directly
+        const nearbyUnits = [];
+        let totalObjectsChecked = 0;
+        
+        // Iterate through all objects in objMgr.objects
+        objMgr.objects.forEach((obj) => {
+          totalObjectsChecked++;
+          if (obj instanceof wow.CGUnit) {
+            const distance = me.distanceTo(obj);
+            if (distance <= 10) {
+              nearbyUnits.push(obj);
+            }
+          }
+        });
+        
+        imgui.textColored({ r: 1.0, g: 1.0, b: 0.2, a: 1.0 }, `Debug: Checked ${totalObjectsChecked} objects, found ${nearbyUnits.length} units within 40yd`);
+        
+        for (const unit of nearbyUnits) {
+          // Debug each unit's properties
+          const debugInfo = {
+            name: unit.unsafeName || "Unknown",
+            isPlayer: unit.isPlayer(),
+            summonedBy: unit.summonedBy ? (unit.summonedBy.isNull ? "null" : "has value") : "undefined",
+            createdBy: unit.createdBy ? (unit.createdBy.isNull ? "null" : "has value") : "undefined",
+            charmedBy: unit.charmedBy ? (unit.charmedBy.isNull ? "null" : "has value") : "undefined",
+            demonCreator: unit.demonCreator ? (unit.demonCreator.isNull ? "null" : "has value") : "undefined",
+            petNumber: unit.petNumber || 0,
+            creatureType: unit.creatureType || "undefined",
+            creatureFamily: unit.creatureFamily || "undefined"
+          };
+          
+          // Only show non-player units for debugging
+          if (!unit.isPlayer()) {
+            imgui.textColored({ r: 0.8, g: 0.8, b: 0.8, a: 1.0 }, 
+              `${debugInfo.name}: sumBy=${debugInfo.summonedBy}, creBy=${debugInfo.createdBy}, petNum=${debugInfo.petNumber}`);
+          }
+          
+          let petInfo = this.analyzePetOwnership(unit);
+          if (petInfo.isPlayerPet) {
+            const colorCode = petInfo.isMine ? { r: 0.2, g: 1.0, b: 0.2, a: 1.0 } : { r: 0.2, g: 0.2, b: 1.0, a: 1.0 };
+            const ownerName = petInfo.ownerName || "Unknown";
+            const displayText = petInfo.isMine ? 
+              `My Pet: ${unit.unsafeName} (${unit.pctHealth.toFixed(0)}%) [${petInfo.linkMethod}]` :
+              `${ownerName}'s Pet: ${unit.unsafeName} (${unit.pctHealth.toFixed(0)}%) [${petInfo.linkMethod}]`;
+            imgui.textColored(colorCode, displayText);
+            
+            // Additional pet details
+            if (petInfo.petType) {
+              imgui.sameLine();
+              imgui.textColored({ r: 0.8, g: 0.8, b: 0.8, a: 1.0 }, ` [${petInfo.petType}]`);
+            }
+          }
+        }
+        */
+        //   imgui.unindent();
+        // }
+
       
       // PVP Mode indicator
       if (Settings.EnablePVPRotation) {
@@ -1608,5 +1684,220 @@ export class JmrSimcBeastMasteryBehavior extends Behavior {
     // Check for major damage cooldowns with sufficient duration (same as JmrSimcArms.js)
     const majorDamageCooldown = pvpHelpers.hasMajorDamageCooldown(unit, 3);
     return majorDamageCooldown !== null;
+  }
+
+  // Enhanced pet-to-player linking using all available SDK features
+  analyzePetOwnership(unit) {
+    const result = {
+      isPlayerPet: false,
+      isMine: false,
+      ownerGuid: null,
+      ownerName: null,
+      petType: null,
+      linkMethod: null
+    };
+
+    // Skip non-units
+    if (!(unit instanceof wow.CGUnit)) {
+      console.log(`[analyzePetOwnership] Skipping non-CGUnit: ${unit}`);
+      return result;
+    }
+
+    // Debug log for each unit we analyze
+    console.log(`[analyzePetOwnership] Analyzing: ${unit.unsafeName} - isPlayer: ${unit.isPlayer()}`);
+    
+    // Skip players
+    if (unit.isPlayer()) {
+      return result;
+    }
+
+    // Method 1: Check summonedBy (most reliable for summoned pets)
+    if (unit.summonedBy && !unit.summonedBy.isNull) {
+      result.isPlayerPet = true;
+      result.ownerGuid = unit.summonedBy;
+      result.linkMethod = "summonedBy";
+      result.isMine = unit.summonedBy.equals(me.guid);
+      
+      // Try to get owner name
+      const owner = unit.summonedBy.toUnit();
+      if (owner && owner.isPlayer()) {
+        result.ownerName = owner.unsafeName;
+        result.petType = this.identifyPetType(unit, owner);
+      }
+      return result;
+    }
+
+    // Method 2: Check createdBy (for created objects/pets)
+    if (unit.createdBy && !unit.createdBy.isNull) {
+      result.isPlayerPet = true;
+      result.ownerGuid = unit.createdBy;
+      result.linkMethod = "createdBy";
+      result.isMine = unit.createdBy.equals(me.guid);
+      
+      // Try to get owner name
+      const owner = unit.createdBy.toUnit();
+      if (owner && owner.isPlayer()) {
+        result.ownerName = owner.unsafeName;
+        result.petType = this.identifyPetType(unit, owner);
+      }
+      return result;
+    }
+
+    // Method 3: Check charmedBy (for charmed units)
+    if (unit.charmedBy && !unit.charmedBy.isNull) {
+      result.isPlayerPet = true;
+      result.ownerGuid = unit.charmedBy;
+      result.linkMethod = "charmedBy";
+      result.isMine = unit.charmedBy.equals(me.guid);
+      
+      const owner = unit.charmedBy.toUnit();
+      if (owner && owner.isPlayer()) {
+        result.ownerName = owner.unsafeName;
+        result.petType = "Charmed";
+      }
+      return result;
+    }
+
+    // Method 4: Check demonCreator (for warlock demons)
+    if (unit.demonCreator && !unit.demonCreator.isNull) {
+      result.isPlayerPet = true;
+      result.ownerGuid = unit.demonCreator;
+      result.linkMethod = "demonCreator";
+      result.isMine = unit.demonCreator.equals(me.guid);
+      
+      const owner = unit.demonCreator.toUnit();
+      if (owner && owner.isPlayer()) {
+        result.ownerName = owner.unsafeName;
+        result.petType = "Demon";
+      }
+      return result;
+    }
+
+    // Method 5: Check PetInfo.pets array (for active pets)
+    if (wow.PetInfo && wow.PetInfo.pets) {
+      for (const petGuid of wow.PetInfo.pets) {
+        if (petGuid.equals(unit.guid)) {
+          result.isPlayerPet = true;
+          result.isMine = true;
+          result.ownerGuid = me.guid;
+          result.ownerName = me.unsafeName;
+          result.linkMethod = "PetInfo.pets";
+          result.petType = "Active Pet";
+          return result;
+        }
+      }
+    }
+
+    // Method 6: Check if unit is in a player's group and has pet-like characteristics
+    if (this.looksLikePet(unit)) {
+      // Find nearby players who might own this pet
+      const nearbyPlayers = me.getUnitsAround(40).filter(u => 
+        u.isPlayer() && u !== me && me.distanceTo(u) <= 40
+      );
+      
+      for (const player of nearbyPlayers) {
+        // Check if pet is very close to this player (likely following)
+        if (player.distanceTo(unit) <= 8) {
+          result.isPlayerPet = true;
+          result.ownerGuid = player.guid;
+          result.ownerName = player.unsafeName;
+          result.linkMethod = "proximity";
+          result.petType = this.identifyPetType(unit, player);
+          result.isMine = false;
+          return result;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // Helper method to identify pet type based on unit properties and owner class
+  identifyPetType(unit, owner) {
+    if (!unit || !owner) return null;
+
+    // Check creature type from wow.d.ts
+    if (unit.creatureType !== undefined) {
+      const creatureTypes = {
+        1: "Beast",
+        2: "Dragonkin", 
+        3: "Demon",
+        4: "Elemental",
+        5: "Giant",
+        6: "Undead",
+        7: "Humanoid",
+        8: "Critter",
+        9: "Mechanical",
+        10: "Not specified",
+        11: "Totem",
+        12: "Non-combat Pet",
+        13: "Gas Cloud"
+      };
+      
+      if (creatureTypes[unit.creatureType]) {
+        return creatureTypes[unit.creatureType];
+      }
+    }
+
+    // Check creature family (Hunter pets)
+    if (unit.creatureFamily !== undefined && unit.creatureFamily > 0) {
+      return "Hunter Pet";
+    }
+
+    // Check pet number (indicates it's a numbered pet)
+    if (unit.petNumber > 0) {
+      return `Pet #${unit.petNumber}`;
+    }
+
+    // Fallback to checking owner's specialization auras for class identification
+    if (owner.hasAura && typeof owner.hasAura === 'function') {
+      // Hunter specs
+      if (owner.hasAura("Beast Mastery Hunter") || owner.hasAura("Marksmanship Hunter") || owner.hasAura("Survival Hunter")) {
+        return "Hunter Pet";
+      }
+      // Warlock specs  
+      if (owner.hasAura("Affliction Warlock") || owner.hasAura("Demonology Warlock") || owner.hasAura("Destruction Warlock")) {
+        return "Demon";
+      }
+      // Death Knight specs
+      if (owner.hasAura("Blood Death Knight") || owner.hasAura("Frost Death Knight") || owner.hasAura("Unholy Death Knight")) {
+        return "Undead Minion";
+      }
+      // Mage specs (for elementals)
+      if (owner.hasAura("Arcane Mage") || owner.hasAura("Fire Mage") || owner.hasAura("Frost Mage")) {
+        return "Elemental";
+      }
+    }
+
+    return "Pet";
+  }
+
+  // Helper method to determine if a unit looks like a pet based on characteristics
+  looksLikePet(unit) {
+    if (!unit || !(unit instanceof wow.CGUnit)) return false;
+
+    // Not a player
+    if (unit.isPlayer()) return false;
+
+    // Has a pet number
+    if (unit.petNumber > 0) return true;
+
+    // Is a known creature type that could be a pet
+    const petLikeCreatureTypes = [1, 3, 4, 6, 9, 11]; // Beast, Demon, Elemental, Undead, Mechanical, Totem
+    if (unit.creatureType !== undefined && petLikeCreatureTypes.includes(unit.creatureType)) {
+      return true;
+    }
+
+    // Has a creature family (Hunter pets)
+    if (unit.creatureFamily !== undefined && unit.creatureFamily > 0) {
+      return true;
+    }
+
+    // Is attackable and in combat (likely a combat pet)
+    if (unit.isAttackable && unit.inCombat()) {
+      return true;
+    }
+
+    return false;
   }
 } 

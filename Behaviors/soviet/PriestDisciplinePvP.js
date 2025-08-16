@@ -519,19 +519,19 @@ export class PriestDisciplinePvP extends Behavior {
       }
 
       // // Hunter pet prediction
-      // if (enemy.hasAura("Hunter") && me.distanceTo(enemy) <= 40) {
-      //   for (const unit of me.getUnitsAround(8)) {
-      //     if (unit.summonedBy(enemy) || unit.createdBy(enemy)) {
-      //       const lastIntimidation = enemyTracking ? enemyTracking[24394] : null;
-      //       const timeSinceIntimidation = lastIntimidation ? currentTime - lastIntimidation : 999999;
+      if (enemy.hasAura("Hunter") && me.distanceTo(enemy) <= 40) {
+        for (const unit of me.getUnitsAround(8)) {
+          if (unit.summonedBy?.equals(enemy.guid) || unit.createdBy?.equals(enemy.guid)) {
+            const lastIntimidation = enemyTracking ? enemyTracking[24394] : null;
+            const timeSinceIntimidation = lastIntimidation ? currentTime - lastIntimidation : 999999;
 
-      //       if (timeSinceIntimidation > 29000) { // Intimidation 30s
-      //         console.log(`[Priest] Preemptive Fade - Enemy hunter ${enemy.unsafeName} has pet within 8y, Intimidation ready`);
-      //         return true;
-      //       }
-      //     }
-      //   }
-      // }
+            if (timeSinceIntimidation > 29000) { // Intimidation 30s
+              console.log(`[Priest] Preemptive Fade - Enemy hunter ${enemy.unsafeName} has pet within 8y, Intimidation ready`);
+              return true;
+            }
+          }
+        }
+      }
     }
 
     return false;
