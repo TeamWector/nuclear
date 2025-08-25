@@ -81,6 +81,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
         { type: "checkbox", uid: "UseTrueshot", text: "Use Trueshot", default: true },
         { type: "checkbox", uid: "UseCounterShot", text: "Use Counter Shot", default: true },
         { type: "checkbox", uid: "UseIntimidation", text: "Use Intimidation", default: true },
+        { type: "checkbox", uid: "IntimidationHealerOnly", text: "Intimidation: Target Healers Only", default: false },
         { type: "checkbox", uid: "UseBinding", text: "Use Binding Shot", default: true },
         { type: "checkbox", uid: "UseFreezingTrap", text: "Use Freezing Trap", default: true },
         { type: "checkbox", uid: "UseTarTrap", text: "Use Tar Trap", default: true },
@@ -789,7 +790,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
   }
 
   findEnemyHealerNotCC() {
-    const enemies = me.getEnemies();
+    const enemies = me.getEnemies(40);
     for (const enemy of enemies) {
       if (enemy.isPlayer() && 
           me.distanceTo(enemy) <= 40 &&
@@ -803,7 +804,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
 
   shouldFeignDeathPVP() {
     // Check if we should feign death to avoid spell reflects or incoming damage
-    const enemies = me.getEnemies();
+    const enemies = me.getEnemies(40);
     for (const enemy of enemies) {
       if (enemy.isPlayer() && 
           me.distanceTo(enemy) <= 40 &&
@@ -819,7 +820,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
 
   findBindingShotTargetPVP() {
     // First priority: enemies within 10y of us
-    const enemiesNearUs = me.getEnemies().filter(enemy => 
+    const enemiesNearUs = me.getEnemies(40).filter(enemy => 
       enemy.isPlayer() && 
       me.distanceTo(enemy) <= 10 &&
       !pvpHelpers.hasImmunity(enemy) &&
@@ -831,7 +832,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
     }
 
     // Second priority: enemies within 10y of our healer
-    const friends = me.getFriends();
+    const friends = me.getFriends(40);
     const healers = friends.filter(member => member.isHealer());
     if (healers.length > 0) {
       const healer = healers[0];
@@ -851,7 +852,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
   }
 
   findFreezingTrapTargetPVP() {
-    const nearbyEnemies = me.getPlayerEnemies(40);
+    const nearbyEnemies = me.getEnemies(40);
 
     for (const unit of nearbyEnemies) {
       if (unit.isHealer() && (unit.isStunned() || unit.isRooted()) && unit.canCC() && unit.getDR("incapacitate") === 0) {
@@ -873,7 +874,7 @@ export class JmrSimcMarksmanBehavior extends Behavior {
   }
 
   findTarTrapLocationPVP() {
-    const enemies = me.getEnemies();
+    const enemies = me.getEnemies(40);
     for (const enemy of enemies) {
       if (enemy.isPlayer() && 
           me.distanceTo(enemy) <= 10 &&
@@ -885,7 +886,21 @@ export class JmrSimcMarksmanBehavior extends Behavior {
   }
 
   findIntimidationTargetPVP() {
-    // First priority: enemies with major cooldowns up
+    // If healer only mode is enabled, only target healers
+    if (Settings.IntimidationHealerOnly) {
+      for (const enemy of me.getEnemies(40)) {
+        if (!enemy.isHealer()) continue;
+        if (pvpHelpers.hasImmunity(enemy)) continue;
+        if (me.distanceTo(enemy) > 30) continue; // Intimidation range
+        
+        if (drTracker.getDRStacks(enemy.guid, "stun") < 2) {
+          return enemy;
+        }
+      }
+      return undefined;
+    }
+
+    // Normal mode: First priority: enemies with major cooldowns up
     for (const enemy of me.getEnemies()) {
       if (!enemy.isPlayer() || pvpHelpers.hasImmunity(enemy)) continue;
       if (me.distanceTo(enemy) > 30) continue; // Intimidation range
@@ -897,11 +912,11 @@ export class JmrSimcMarksmanBehavior extends Behavior {
 
     // Second priority: enemy healer if no stun DR
     for (const enemy of me.getEnemies()) {
-      if (!enemy.isPlayer() && !enemy.isHealer()) continue;
+      if (!enemy.isPlayer() || !enemy.isHealer()) continue;
       if (pvpHelpers.hasImmunity(enemy)) continue;
-      if (me.distanceTo(enemy) > 40) continue;
+      if (me.distanceTo(enemy) > 30) continue;
       
-      if (drTracker.getDRStacks(enemy.guid, "stun") <= 1) {
+      if (drTracker.getDRStacks(enemy.guid, "stun") < 2) {
         return enemy;
       }
     }

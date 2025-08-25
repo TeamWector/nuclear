@@ -514,8 +514,8 @@ export class WarriorArmsNewBehavior extends Behavior {
       spell.cast("Victory Rush", () => Settings.UseVictoryRush && me.pctHealth < Settings.VictoryRushHealthPct),
       
       // Interrupts (respect both settings and overlay toggles)
-      spell.interrupt("Pummel", () => Settings.UsePummel && this.overlayToggles.interrupts.value && this.overlayToggles.pummel.value),
-      spell.interrupt("Storm Bolt", () => Settings.UseStormBoltInterrupt && this.overlayToggles.interrupts.value && this.overlayToggles.stormBolt.value)
+      spell.interrupt("Pummel"),
+      spell.interrupt("Storm Bolt")
     );
   }
 
@@ -994,6 +994,44 @@ export class WarriorArmsNewBehavior extends Behavior {
       // Intimidating Shout for multi-target fear
       spell.cast("Intimidating Shout", on => this.findIntimidatingShoutTarget(), req => this.findIntimidatingShoutTarget() !== null),
       
+      // Hamstring for slowing enemies (high priority after CC)
+      spell.cast("Hamstring", () => {
+        if (!Settings.UseHamstring) {
+          return false;
+        }
+        
+        const target = this.getCurrentTargetPVP();
+        if (!target) {
+          return false;
+        }
+        
+        // Don't cast if target has movement debuffs already
+        if (target.hasVisibleAura(1715) || target.hasVisibleAura(12323)) {
+          return false;
+        }
+        
+        // Don't cast if target has immunity or slow immunity
+        if (pvpHelpers.hasImmunity(target)) {
+          return false;
+        }
+        if (target.hasVisibleAura(1044)) { // Blessing of Freedom
+          return false;
+        }
+        
+        // Check timing based on ACTUAL successful casts from Spell.js
+        const lastSuccessfulTime = spell._lastSuccessfulCastTimes.get("hamstring");
+        const now = wow.frameTime;
+        const timeSinceSuccess = lastSuccessfulTime ? now - lastSuccessfulTime : 999999;
+        
+        // Only cast every X seconds after successful cast (user configurable)
+        if (lastSuccessfulTime && timeSinceSuccess < (Settings.HamstringCooldown * 1000)) {
+          return false;
+        }
+        
+        console.log(`Hamstring ready - target: ${target.unsafeName}, timeSince: ${(timeSinceSuccess/1000).toFixed(1)}s`);
+        return true;
+      }),
+      
       // Battle Shout
       spell.cast("Battle Shout", () => !me.hasAura("Battle Shout")),
       
@@ -1009,11 +1047,7 @@ export class WarriorArmsNewBehavior extends Behavior {
       ),
       
       // Interrupts and CC
-      spell.interrupt("Pummel", () => 
-        Settings.UsePummel && 
-        this.overlayToggles.interrupts.value && 
-        this.overlayToggles.pummel.value
-      ),
+      spell.interrupt("Pummel"),
       
       // Shattering Throw for Ice Block/Divine Shield
       spell.cast("Shattering Throw", on => this.findShatteringThrowTarget(), req => this.findShatteringThrowTarget() !== null),
@@ -1042,24 +1076,7 @@ export class WarriorArmsNewBehavior extends Behavior {
         this.shouldSpellReflectPVP()
       ),
 
-      // Hamstring (with cooldown check)
-      spell.cast("Hamstring", on => this.getCurrentTargetPVP(), req => {
-        if (!Settings.UseHamstring) return false;
-        const target = this.getCurrentTargetPVP();
-        if (!target) return false;
-        
-        // Simple cooldown check - don't cast if we cast it recently
-        if (!this.lastHamstringTime) this.lastHamstringTime = 0;
-        const timeSince = wow.frameTime - this.lastHamstringTime;
-        if (timeSince < 12000) return false; // 12 second cooldown
-        
-        return true;
-      },
-      ret => {
-        if (ret === bt.Status.Success) {
-          this.lastHamstringTime = wow.frameTime;
-        }
-      }),
+      // Hamstring moved to higher priority position after CC abilities
       
 
       
@@ -1089,11 +1106,7 @@ export class WarriorArmsNewBehavior extends Behavior {
       ),
       
       // Storm Bolt interrupts
-      spell.interrupt("Storm Bolt", () => 
-        Settings.UseStormBoltInterrupt && 
-        this.overlayToggles.interrupts.value && 
-        this.overlayToggles.stormBolt.value
-      ),
+      spell.interrupt("Storm Bolt"),
       
       // Piercing Howl
       spell.cast("Piercing Howl", () => Settings.UsePiercingHowl && this.shouldCastPiercingHowl()),
@@ -1386,41 +1399,9 @@ export class WarriorArmsNewBehavior extends Behavior {
        ),
       
       // Pummel interrupts for PVP
-      spell.interrupt("Pummel", () => 
-        Settings.UsePummel && 
-        this.overlayToggles.interrupts.value && 
-        this.overlayToggles.pummel.value
-      ),
+      spell.interrupt("Pummel"),
       
-              // Hamstring - use successful cast tracking from Spell.js
-        spell.cast("Hamstring", () => {
-          if (!Settings.UseHamstring) return false;
-          
-          const target = this.getCurrentTargetPVP();
-          if (!target) return false;
-
-          if (!target.isPlayer()) return false;
-          
-          // Don't cast if target has movement debuffs already
-          if (target.hasVisibleAura(1715) || target.hasVisibleAura(12323)) return false;
-          
-          // Don't cast if target has immunity or slow immunity
-          if (pvpHelpers.hasImmunity(target)) return false;
-          if (target.hasVisibleAura(1044)) return false; // Blessing of Freedom
-          
-          // Check timing based on ACTUAL successful casts from Spell.js
-          const lastSuccessfulTime = spell._lastSuccessfulCastTimes.get("hamstring");
-          const now = wow.frameTime;
-          const timeSinceSuccess = lastSuccessfulTime ? now - lastSuccessfulTime : 999999;
-          
-          // Only cast every 30 seconds after successful cast
-          if (lastSuccessfulTime && timeSinceSuccess < 12000) {
-            return false;
-          }
-          
-          //console.info("Hamstring allowed - timeSinceSuccess:", timeSinceSuccess);
-          return true;
-        }),
+      // Hamstring is handled in main PVP rotation for better priority
       
       // CC enemies with major cooldowns - SAME AS FURY
       spell.cast(236077, on => this.findDisarmTarget(), req => this.findDisarmTarget() !== null),
@@ -1453,11 +1434,7 @@ export class WarriorArmsNewBehavior extends Behavior {
       ),
       
       // Storm Bolt interrupts
-      spell.interrupt("Storm Bolt", () => 
-        Settings.UseStormBoltInterrupt && 
-        this.overlayToggles.interrupts.value && 
-        this.overlayToggles.stormBolt.value
-      ),
+      spell.interrupt("Storm Bolt"),
       
       // Piercing Howl
       spell.cast("Piercing Howl", () => Settings.UsePiercingHowl && this.shouldCastPiercingHowl()),
@@ -1986,9 +1963,9 @@ export class WarriorArmsNewBehavior extends Behavior {
           me.distanceTo(friend) <= 25) { // Intervene range
         
         // Check for specific rogue CC debuffs
-        const hasCheapShot = friend.hasAura(1833);   // Cheap Shot
-        const hasKidneyShot = friend.hasAura(408);   // Kidney Shot  
-        const hasGarrote = friend.hasAura(703);      // Garrote (silence)
+        const hasCheapShot = friend.hasVisibleAura(1833);   // Cheap Shot
+        const hasKidneyShot = friend.hasVisibleAura(408);   // Kidney Shot  
+        const hasGarrote = friend.hasVisibleAura(703);      // Garrote (silence)
         
         if (hasCheapShot || hasKidneyShot || hasGarrote) {
           console.info(`[Arms] Found healer ${friend.unsafeName} under rogue CC - attempting Intervene`);
