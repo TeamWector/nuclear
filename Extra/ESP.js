@@ -1,10 +1,87 @@
 import Settings from '@/Core/Settings';
 import objMgr, { me } from '@/Core/ObjectManager';
 import colors from '@/Enums/Colors';
+import spell from '@/Core/Spell';
+
+// Common area trigger spell names (for spells we don't know)
+const commonAreaTriggerSpells = {
+  // Death Knight
+  43265: "Death and Decay",
+  188290: "Death and Decay",
+  
+  // Demon Hunter
+  258920: "Immolation Aura",
+  
+  // Druid
+  102793: "Ursol's Vortex",
+  
+  // Hunter
+  162488: "Steel Trap",
+  13809: "Ice Trap",
+  1499: "Freezing Trap",
+  
+  // Mage
+  84721: "Frozen Orb",
+  12654: "Ignite",
+  190336: "Conjure Refreshment",
+  
+  // Monk
+  116847: "Rushing Jade Wind",
+  261715: "Jade Wind",
+  
+  // Paladin
+  26573: "Consecration",
+  204019: "Blessed Hammer",
+  
+  // Priest
+  34861: "Circle of Healing",
+  64843: "Divine Hymn",
+  
+  // Rogue
+  185565: "Poisoned Knife",
+  
+  // Shaman
+  61882: "Earthquake",
+  73920: "Healing Rain",
+  192222: "Liquid Magma Totem",
+  
+  // Warlock
+  5740: "Rain of Fire",
+  42223: "Rain of Fire",
+  
+  // Warrior
+  118000: "Dragon Roar",
+  
+  // Generic/Common
+  26364: "Lightning Shield",
+  61295: "Riptide"
+};
 import { damageBuffs, pvpImmunityBuffs } from '@/Data/PVPData';
 
 class ESP {
   static tabName = "ESP";
+  
+  // Track area trigger creation times for countdown
+  static areaTriggerTimestamps = new Map();
+  
+  // Cache spell names to avoid repeated lookups
+  static spellNameCache = new Map();
+
+  // Helper method to safely validate area trigger objects
+  static isValidAreaTrigger(areaTrigger) {
+    if (!areaTrigger || !(areaTrigger instanceof wow.CGAreaTrigger)) {
+      return false;
+    }
+    
+    try {
+      // Try to access basic properties to verify object is still valid
+      const _ = areaTrigger.guid;
+      const __ = areaTrigger.spellId;
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
 
   static options = [
     // Main toggles
@@ -19,6 +96,17 @@ class ESP {
     { type: "checkbox", uid: "ESPShowGameObjects", text: "Show Game Objects", default: false },
     { type: "checkbox", uid: "ESPShowDynamicObjects", text: "Show Dynamic Objects", default: false },
     { type: "checkbox", uid: "ESPShowAreaTriggers", text: "Show Area Triggers", default: false },
+    
+    // Area trigger filters
+    { type: "checkbox", uid: "ESPShowOwnAreaTriggers", text: "Show Own Area Triggers", default: true },
+    { type: "checkbox", uid: "ESPShowEnemyAreaTriggers", text: "Show Enemy Area Triggers", default: true },
+    { type: "checkbox", uid: "ESPShowFriendlyAreaTriggers", text: "Show Friendly Area Triggers", default: true },
+    { type: "checkbox", uid: "ESPShowNeutralAreaTriggers", text: "Show Neutral Area Triggers", default: false },
+    
+    // Area trigger display options
+    { type: "checkbox", uid: "ESPShowAreaTriggerNames", text: "Show Area Trigger Names", default: true },
+    { type: "checkbox", uid: "ESPShowAreaTriggerDuration", text: "Show Area Trigger Duration", default: true },
+    { type: "checkbox", uid: "ESPShowAreaTriggerPlayerCount", text: "Show Area Trigger Player Count", default: true },
     
     // Line settings
     { type: "checkbox", uid: "ESPDrawLines", text: "Draw Lines to Targets", default: true },
@@ -79,14 +167,16 @@ class ESP {
     renderFunction([
       { header: "Main Settings", options: this.options.slice(0, 3) },
       { header: "Target Type Filters", options: this.options.slice(3, 9) },
-      { header: "Line Settings", options: this.options.slice(9, 12) },
-      { header: "Circle Settings", options: this.options.slice(12, 20) },
-      { header: "Colors", options: this.options.slice(20, 29) },
-      { header: "LOS Settings", options: this.options.slice(29, 34) },
-      { header: "Target Highlighting", options: this.options.slice(34, 37) },
-      { header: "Information Display", options: this.options.slice(37, 40) },
-      { header: "Filters & Range", options: this.options.slice(40, 43) },
-      { header: "Performance", options: this.options.slice(43) },
+      { header: "Area Trigger Filters", options: this.options.slice(9, 13) },
+      { header: "Area Trigger Display", options: this.options.slice(13, 16) },
+      { header: "Line Settings", options: this.options.slice(16, 19) },
+      { header: "Circle Settings", options: this.options.slice(19, 27) },
+      { header: "Colors", options: this.options.slice(27, 36) },
+      { header: "LOS Settings", options: this.options.slice(36, 41) },
+      { header: "Target Highlighting", options: this.options.slice(41, 44) },
+      { header: "Information Display", options: this.options.slice(44, 47) },
+      { header: "Filters & Range", options: this.options.slice(47, 50) },
+      { header: "Performance", options: this.options.slice(50) },
     ]);
   }
 
@@ -94,6 +184,14 @@ class ESP {
     if (!Settings.ESPEnabled || !me) return;
 
     const currentTime = wow.frameTime;
+    
+    // Cleanup expired area trigger timestamps
+    for (const [guid, triggerData] of this.areaTriggerTimestamps) {
+      const elapsed = currentTime - triggerData.firstSeen;
+      if (elapsed >= triggerData.totalDuration) {
+        this.areaTriggerTimestamps.delete(guid);
+      }
+    }
     
     // Update rate throttling
     if (currentTime - this.lastUpdate < Settings.ESPUpdateRate) {
@@ -127,7 +225,12 @@ class ESP {
 
       // Check object type and filters
       const objectType = this.getObjectType(obj);
-      if (!this.shouldShowObjectType(objectType)) return;
+      if (!this.shouldShowObjectType(objectType, obj)) return;
+      
+      // Additional validation for area triggers
+      if (objectType === 'areatrigger' && !this.isValidAreaTrigger(obj)) {
+        return; // Skip invalid area triggers
+      }
 
       // Skip dead objects (only applies to units)
       if (obj instanceof wow.CGUnit && obj.deadOrGhost) return;
@@ -211,7 +314,7 @@ class ESP {
     }
   }
 
-  static shouldShowObjectType(objectType) {
+  static shouldShowObjectType(objectType, obj = null) {
     switch (objectType) {
       case 'player':
         return Settings.ESPShowPlayers;
@@ -224,9 +327,45 @@ class ESP {
       case 'dynamicobject':
         return Settings.ESPShowDynamicObjects;
       case 'areatrigger':
-        return Settings.ESPShowAreaTriggers;
+        return Settings.ESPShowAreaTriggers && this.shouldShowAreaTrigger(obj);
       default:
         return false;
+    }
+  }
+
+  static shouldShowAreaTrigger(areaTrigger) {
+    if (!this.isValidAreaTrigger(areaTrigger)) {
+      return false;
+    }
+    
+    // Check caster relationship and corresponding setting
+    try {
+      // Safely access caster property
+      const caster = areaTrigger.caster ? areaTrigger.caster.toUnit() : null;
+      
+      if (!caster) {
+        // Unknown caster - treat as neutral
+        return Settings.ESPShowNeutralAreaTriggers;
+      }
+      
+      // Check relationship to player
+      if (caster.guid && caster.guid.equals(me.guid)) {
+        // Player's own area trigger
+        return Settings.ESPShowOwnAreaTriggers;
+      } else if (me.canAttack(caster)) {
+        // Enemy area trigger
+        return Settings.ESPShowEnemyAreaTriggers;
+      } else if (caster.inMyGroup && caster.inMyGroup()) {
+        // Friendly party/raid member area trigger
+        return Settings.ESPShowFriendlyAreaTriggers;
+      } else {
+        // Neutral/other friendly area trigger
+        return Settings.ESPShowNeutralAreaTriggers;
+      }
+    } catch (error) {
+      // Object became invalid or caster lookup failed
+      console.log(`ESP: Error checking area trigger caster relationship: ${error.message}`);
+      return false; // Don't show invalid objects
     }
   }
 
@@ -268,6 +407,20 @@ class ESP {
 
     for (const target of this.cachedTargets) {
       if (!target.screenPos || target.screenPos.x === -1) continue;
+      
+      // Validate target object is still valid before rendering
+      if (!target.unit) continue;
+      
+      try {
+        // Quick validation for area triggers
+        if (target.unit instanceof wow.CGAreaTrigger) {
+          const _ = target.unit.position;
+          const __ = target.unit.guid;
+        }
+      } catch (error) {
+        // Object became invalid, skip this target entirely
+        continue;
+      }
 
       const baseColor = this.getTargetColor(target);
       const lineColor = this.applyOpacity(baseColor, Settings.ESPLineOpacity / 100);
@@ -347,6 +500,11 @@ class ESP {
       return colors[Settings.ESPTargetColor] || colors.yellow;
     }
     
+    // Special handling for area triggers based on caster relationship
+    if (target.unit instanceof wow.CGAreaTrigger) {
+      return this.getAreaTriggerCircleColor(target.unit);
+    }
+    
     // For units, check friend/enemy status first
     if (target.unit instanceof wow.CGUnit) {
       if (target.isFriend) {
@@ -389,34 +547,61 @@ class ESP {
     }
   }
 
-  static drawSimpleCircle(canvas, target, radius, color, segments, thickness) {
+    static drawSimpleCircle(canvas, target, radius, color, segments, thickness) {
+    // Validate target object before drawing
+    if (!target || !target.unit) return;
+    
+    try {
+      // Validate object still exists
+      const _ = target.unit.position;
+    } catch (error) {
+      // Object became invalid, skip drawing
+      return;
+    }
+    
     const step = (2 * Math.PI) / segments;
     const points = [];
 
-    // Generate circle points in 3D world space
-    for (let i = 0; i < segments; i++) {
-      const angle = step * i;
-      const worldPoint = new Vector3(
-        target.unit.position.x + radius * Math.cos(angle),
-        target.unit.position.y + radius * Math.sin(angle),
-        target.unit.position.z
-      );
-      
-      const screenPoint = wow.WorldFrame.getScreenCoordinates(worldPoint);
-      if (screenPoint && screenPoint.x !== -1) {
-        points.push(screenPoint);
-      }
-    }
+    try {
+      // Generate circle points in 3D world space
+      for (let i = 0; i < segments; i++) {
+        const angle = step * i;
+        const worldPoint = new Vector3(
+          target.unit.position.x + radius * Math.cos(angle),
+          target.unit.position.y + radius * Math.sin(angle),
+          target.unit.position.z
+        );
 
-    // Draw the circle segments normally
-    for (let i = 0; i < points.length; i++) {
-      const start = points[i];
-      const end = points[(i + 1) % points.length];
-      canvas.addLine(start, end, color, thickness);
+        const screenPoint = wow.WorldFrame.getScreenCoordinates(worldPoint);
+        if (screenPoint && screenPoint.x !== -1) {
+          points.push(screenPoint);
+        }
+      }
+
+      // Draw the circle segments normally
+      for (let i = 0; i < points.length; i++) {
+        const start = points[i];
+        const end = points[(i + 1) % points.length];
+        canvas.addLine(start, end, color, thickness);
+      }
+    } catch (positionError) {
+      // Object position became invalid during circle generation
+      return;
     }
   }
 
   static drawGlowCircle(canvas, target, baseRadius, baseColor, segments, thickness) {
+    // Validate target object before drawing
+    if (!target || !target.unit) return;
+    
+    try {
+      // Validate object still exists
+      const _ = target.unit.position;
+    } catch (error) {
+      // Object became invalid, skip drawing
+      return;
+    }
+    
     const glowLayers = Settings.ESPGlowLayers;
     const step = (2 * Math.PI) / segments;
     
@@ -433,46 +618,65 @@ class ESP {
       
       const points = [];
       
-      // Generate circle points for this layer
-      for (let i = 0; i < segments; i++) {
-        const angle = step * i;
-        const worldPoint = new Vector3(
-          target.unit.position.x + layerRadius * Math.cos(angle),
-          target.unit.position.y + layerRadius * Math.sin(angle),
-          target.unit.position.z
-        );
+      try {
+        // Generate circle points for this layer
+        for (let i = 0; i < segments; i++) {
+          const angle = step * i;
+          const worldPoint = new Vector3(
+            target.unit.position.x + layerRadius * Math.cos(angle),
+            target.unit.position.y + layerRadius * Math.sin(angle),
+            target.unit.position.z
+          );
         
-        const screenPoint = wow.WorldFrame.getScreenCoordinates(worldPoint);
-        if (screenPoint && screenPoint.x !== -1) {
-          points.push(screenPoint);
+          const screenPoint = wow.WorldFrame.getScreenCoordinates(worldPoint);
+          if (screenPoint && screenPoint.x !== -1) {
+            points.push(screenPoint);
+          }
         }
-      }
-      
-      // Draw this layer of the glow
-      for (let i = 0; i < points.length; i++) {
-        const start = points[i];
-        const end = points[(i + 1) % points.length];
-        canvas.addLine(start, end, layerColor, layerThickness);
+        
+        // Draw this layer of the glow
+        for (let i = 0; i < points.length; i++) {
+          const start = points[i];
+          const end = points[(i + 1) % points.length];
+          canvas.addLine(start, end, layerColor, layerThickness);
+        }
+      } catch (positionError) {
+        // Object position became invalid during circle generation, skip this layer
+        break;
       }
     }
   }
 
   static getEntityRadius(target) {
-    if (!Settings.ESPUseEntitySize || !(target.unit instanceof wow.CGUnit)) {
+    if (!Settings.ESPUseEntitySize) {
       return Settings.ESPCircleRadius;
     }
 
-    const unit = target.unit;
     let radius = Settings.ESPCircleRadius;
 
-    // Use boundingRadius if available
-    if (unit.boundingRadius && unit.boundingRadius > 0) {
-      radius = Math.max(unit.boundingRadius, 1.5); // Minimum 1.5 yards
-    }
-
-    // Scale by displayScale if available and reasonable
-    if (unit.displayScale && unit.displayScale > 0.1 && unit.displayScale < 5.0) {
-      radius *= unit.displayScale;
+    try {
+      // Handle area triggers - use their boundingRadius
+      if (target.unit instanceof wow.CGAreaTrigger) {
+        if (target.unit.boundingRadius && target.unit.boundingRadius > 0) {
+          radius = Math.max(target.unit.boundingRadius, 1.5); // Minimum 1.5 yards
+        }
+      }
+      // Handle units - use their boundingRadius  
+      else if (target.unit instanceof wow.CGUnit) {
+        if (target.unit.boundingRadius && target.unit.boundingRadius > 0) {
+          radius = Math.max(target.unit.boundingRadius, 1.5); // Minimum 1.5 yards
+        }
+        
+        // Scale by displayScale if available and reasonable (for units only)
+        if (target.unit.displayScale && target.unit.displayScale > 0.1 && target.unit.displayScale < 5.0) {
+          radius *= target.unit.displayScale;
+        }
+      }
+    } catch (error) {
+      // Object became invalid while accessing properties
+      console.log(`ESP: Error getting entity radius: ${error.message}`);
+      // Use default radius if object access fails
+      radius = Settings.ESPCircleRadius;
     }
 
     // Clamp radius to reasonable bounds
@@ -637,16 +841,143 @@ class ESP {
   }
 
   static drawTargetInformation(canvas, target) {
+    // Validate target object exists and is still valid
+    if (!target || !target.unit) return;
+    
+    try {
+      // Quick validation - try to access a basic property
+      const _ = target.unit.guid;
+    } catch (error) {
+      // Object is invalid, skip rendering
+      return;
+    }
+    
     let yOffset = 5; // Start slightly below the unit
     
     // Show unit name
     if (Settings.ESPShowNames && target.unit) {
       try {
-        const unitName = target.unit.unsafeName || target.unit.name;
+        let unitName;
+        
+        // Special handling for area triggers - use spell name from spellId
+        if (target.unit instanceof wow.CGAreaTrigger) {
+          // Double-check validity before processing
+          if (!this.isValidAreaTrigger(target.unit)) {
+            unitName = "Invalid Area Trigger";
+          } else {
+            try {
+              let spellName = "";
+              
+              // Get spell name if enabled
+              if (Settings.ESPShowAreaTriggerNames) {
+                spellName = `Spell ${target.unit.spellId || 0}`;
+                
+                // Safely get spell ID
+                const targetSpellId = target.unit.spellId;
+                if (targetSpellId) {
+                  // Check cache first to avoid repeated lookups
+                  if (this.spellNameCache.has(targetSpellId)) {
+                    spellName = this.spellNameCache.get(targetSpellId);
+                  } else {
+                    try {
+                      // Try direct spell object creation (bypasses isKnown check)
+                      const directSpell = new wow.Spell(targetSpellId);
+                      if (directSpell && directSpell.name) {
+                        spellName = directSpell.name;
+                        this.spellNameCache.set(targetSpellId, spellName);
+                        console.log(`ESP: Found spell name via direct lookup for ID ${targetSpellId}: ${directSpell.name}`);
+                      } else {
+                        // Try the spell system (works for known spells)
+                        const spellObject = spell.getSpell(targetSpellId);
+                        if (spellObject && spellObject.name) {
+                          spellName = spellObject.name;
+                          this.spellNameCache.set(targetSpellId, spellName);
+                          console.log(`ESP: Found spell name via spell system for ID ${targetSpellId}: ${spellObject.name}`);
+                        } else {
+                          // Fallback to common area trigger spell database
+                          if (commonAreaTriggerSpells[targetSpellId]) {
+                            spellName = commonAreaTriggerSpells[targetSpellId];
+                            this.spellNameCache.set(targetSpellId, spellName);
+                            console.log(`ESP: Using fallback name for ID ${targetSpellId}: ${spellName}`);
+                          } else {
+                            // Cache the fallback and log unknown spell IDs
+                            this.spellNameCache.set(targetSpellId, spellName);
+                            console.log(`ESP: Unknown area trigger spell ID ${targetSpellId} - add to database`);
+                          }
+                        }
+                      }
+                    } catch (spellError) {
+                      console.log(`ESP: Error looking up spell ${targetSpellId}: ${spellError.message}`);
+                      this.spellNameCache.set(targetSpellId, spellName); // Cache the fallback
+                    }
+                  }
+                }
+              }
+              
+              // Add duration info if enabled
+              let durationText = "";
+              if (Settings.ESPShowAreaTriggerDuration) {
+                try {
+                  if (target.unit.duration && target.unit.duration > 0) {
+                    const guid = target.unit.guid ? target.unit.guid.hash : null;
+                    
+                    if (guid) {
+                      // Track when we first see this area trigger
+                      if (!this.areaTriggerTimestamps.has(guid)) {
+                        this.areaTriggerTimestamps.set(guid, {
+                          firstSeen: wow.frameTime,
+                          totalDuration: target.unit.duration
+                        });
+                      }
+                      
+                      // Calculate remaining time based on when we first saw it
+                      const triggerData = this.areaTriggerTimestamps.get(guid);
+                      const elapsed = wow.frameTime - triggerData.firstSeen;
+                      const remaining = Math.max(0, triggerData.totalDuration - elapsed);
+                      const remainingSeconds = Math.ceil(remaining / 1000);
+                      
+                      if (remainingSeconds > 0) {
+                        durationText = ` (${remainingSeconds}s)`;
+                      }
+                    }
+                  }
+                } catch (durationError) {
+                  // Duration calculation failed, skip duration display
+                }
+              }
+              
+              // Add player count info if enabled
+              let playerCountText = "";
+              if (Settings.ESPShowAreaTriggerPlayerCount) {
+                try {
+                  if (target.unit.numPlayersInside !== undefined && target.unit.numPlayersInside > 0) {
+                    playerCountText = ` [${target.unit.numPlayersInside}p]`;
+                  }
+                } catch (playerCountError) {
+                  // Player count failed, skip player count display
+                }
+              }
+              
+              // Combine all parts
+              unitName = spellName + durationText + playerCountText;
+              
+              // If no information is enabled, show minimal info
+              if (!Settings.ESPShowAreaTriggerNames && !Settings.ESPShowAreaTriggerDuration && !Settings.ESPShowAreaTriggerPlayerCount) {
+                unitName = "Area Trigger";
+              }
+            } catch (areaTriggerError) {
+              // Area trigger object became invalid, use fallback
+              console.log(`ESP: Area trigger object became invalid: ${areaTriggerError.message}`);
+              unitName = "Invalid Area Trigger";
+            }
+          }
+        } else {
+          unitName = target.unit.unsafeName || target.unit.name;
+        }
         
         if (unitName && typeof unitName === 'string' && unitName.trim() !== '') {
           const trimmedName = unitName.trim();
-          const { color: textColor, hasShadow } = this.getNameColor(target.unit);
+          const { color: textColor, hasShadow } = this.getDisplayColor(target.unit);
           
           // Calculate text width to center it
           const textSize = imgui.calcTextSize(trimmedName);
@@ -839,6 +1170,88 @@ class ESP {
     
     // Fallback to rough estimation if projection fails
     return worldDistance * 20;
+  }
+
+  static getDisplayColor(unit) {
+    // Handle area triggers based on caster relationship
+    if (unit instanceof wow.CGAreaTrigger) {
+      return this.getAreaTriggerColor(unit);
+    }
+    
+    // Handle regular units
+    return this.getNameColor(unit);
+  }
+
+  static getAreaTriggerColor(areaTrigger) {
+    if (!this.isValidAreaTrigger(areaTrigger)) {
+      return { color: colors.white || 0xFFFFFFFF, hasShadow: false };
+    }
+    
+    try {
+      // Find the caster unit
+      const caster = areaTrigger.caster ? areaTrigger.caster.toUnit() : null;
+      
+      if (!caster) {
+        return { color: colors.gray || 0xFF808080, hasShadow: false };
+      }
+      
+      // Check relationship to player
+      if (caster.guid.equals(me.guid)) {
+        // Player's own area trigger
+        return { color: colors.lightblue || 0xFFADD8E6, hasShadow: false };
+      } else if (me.canAttack(caster)) {
+        // Enemy area trigger
+        return { color: colors.red || 0xFFFF0000, hasShadow: false };
+      } else if (caster.inMyGroup && caster.inMyGroup()) {
+        // Friendly party/raid member area trigger
+        return { color: colors.green || 0xFF00FF00, hasShadow: false };
+      } else {
+        // Neutral/other friendly area trigger
+        return { color: colors.yellow || 0xFFFFFF00, hasShadow: false };
+      }
+    } catch (error) {
+      // Fallback if caster lookup fails
+      return { color: colors.gray || 0xFF808080, hasShadow: false };
+    }
+  }
+
+  static getAreaTriggerCircleColor(areaTrigger) {
+    if (!this.isValidAreaTrigger(areaTrigger)) {
+      return colors.gray || 0xFF808080;
+    }
+    
+    try {
+      // Safely check if object still exists and has caster
+      if (!areaTrigger.caster) {
+        return colors.gray || 0xFF808080;
+      }
+      
+      // Find the caster unit
+      const caster = areaTrigger.caster.toUnit();
+      
+      if (!caster || !caster.guid) {
+        return colors.gray || 0xFF808080;
+      }
+      
+      // Check relationship to player for circle colors
+      if (caster.guid.equals(me.guid)) {
+        // Player's own area trigger - blue
+        return colors.lightblue || 0xFFADD8E6;
+      } else if (me.canAttack(caster)) {
+        // Enemy area trigger - red
+        return colors.red || 0xFFFF0000;
+      } else if (caster.inMyGroup && caster.inMyGroup()) {
+        // Friendly party/raid member area trigger - green
+        return colors.green || 0xFF00FF00;
+      } else {
+        // Neutral/other friendly area trigger - yellow
+        return colors.yellow || 0xFFFFFF00;
+      }
+    } catch (error) {
+      // Object became invalid, use gray
+      console.log(`ESP: Area trigger circle color lookup failed: ${error.message}`);
+      return colors.gray || 0xFF808080;
+    }
   }
 
   static getNameColor(unit) {
