@@ -1732,7 +1732,7 @@ export class WarriorArmsNewBehavior extends Behavior {
     
     if (!friendlyHealer) {
       // No friendly healer detected, use at higher health threshold
-      return me.pctHealth < Settings.ImpendingVictoryNoHealerHealthPct;
+      return me.effectiveHealthPercent < Settings.ImpendingVictoryNoHealerHealthPct;
     }
     
     // Check if our healer is not in LOS or is CC'd
@@ -1746,11 +1746,11 @@ export class WarriorArmsNewBehavior extends Behavior {
     
     if (healerNotInLOS || healerCCd) {
       // Our healer is unavailable, use at higher health threshold
-      return me.pctHealth < Settings.ImpendingVictoryNoHealerHealthPct;
+      return me.effectiveHealthPercent < Settings.ImpendingVictoryNoHealerHealthPct;
     }
     
     // Our healer is available, use normal threshold
-    return me.pctHealth < Settings.ImpendingVictoryHealthPct;
+    return me.effectiveHealthPercent < Settings.ImpendingVictoryHealthPct;
   }
 
   findShatteringThrowTarget() {

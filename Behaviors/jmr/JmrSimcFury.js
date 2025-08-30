@@ -499,7 +499,7 @@ export class JmrSimcFuryBehavior extends Behavior {
 
       // Defensive abilities with user options
       spell.cast("Rallying Cry", () => Settings.UseRallyingCry && me.pctHealth < Settings.RallyingCryHealthPct),
-      spell.cast("Victory Rush", () => Settings.UseVictoryRush && me.pctHealth < Settings.VictoryRushHealthPct),
+      spell.cast("Victory Rush", () => Settings.UseVictoryRush && me.effectiveHealthPercent < Settings.VictoryRushHealthPct),
       spell.cast("Enraged Regeneration", () => Settings.UseEnragedRegeneration && me.pctHealth < Settings.EnragedRegenerationHealthPct),
       spell.cast("Bloodthirst", () => Settings.UseBloodthirstHealing && me.pctHealth < Settings.BloodthirstHealingHealthPct && me.hasVisibleAura("Enraged Regeneration")),
 
@@ -1045,7 +1045,7 @@ export class JmrSimcFuryBehavior extends Behavior {
       spell.cast("Victory Rush", () => 
         Settings.UseVictoryRush && 
         this.overlayToggles.defensives.value &&
-        me.pctHealth < Settings.VictoryRushHealthPct
+        me.effectiveHealthPercent < Settings.VictoryRushHealthPct
       ),
       spell.cast("Enraged Regeneration", () => 
         Settings.UseEnragedRegeneration && 

@@ -61,6 +61,7 @@ export default class BehaviorBuilder {
         root.addChild(composite);
       } catch(err) {
         console.error(err);
+        console.error(err.stack)
       }
     });
     enableDebug(root);

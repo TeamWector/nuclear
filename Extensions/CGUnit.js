@@ -25,6 +25,13 @@ Object.defineProperties(wow.CGUnit.prototype, {
     }
   },
 
+  forceUpdateAuras: {
+    value: function () {
+      this._cacheAuras = originalAurasGetter.call(this);
+      this._cacheAurasRefreshTime = wow.frameTime + Settings.AuraCacheTimeMs;
+    }
+  },
+
   auras: {
     get: function () {
       if (this._cacheAuras === undefined || this._cacheAurasRefreshTime < wow.frameTime) {
