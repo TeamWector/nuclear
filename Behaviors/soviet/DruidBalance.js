@@ -7,6 +7,8 @@ import Specialization from "@/Enums/Specialization";
 import common from "@/Core/Common";
 import Settings from "@/Core/Settings";
 import { PowerType } from "@/Enums/PowerType";
+import { DispelPriority } from "@/Data/Dispels";
+import { WoWDispelType } from "@/Enums/Auras";
 
 const auras = {
   moonkinForm: 24858,
@@ -91,6 +93,9 @@ export class DruidBalance extends Behavior {
         new bt.Selector(
           // Defensive cooldowns (highest priority)
           this.defensiveCooldowns(),
+
+          // Dispels
+          spell.dispel("Remove Corruption", true, DispelPriority.Low, false, WoWDispelType.Curse, WoWDispelType.Poison),
 
           // Burst damage when conditions are met
           new bt.Decorator(
