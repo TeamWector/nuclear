@@ -10,6 +10,8 @@ import { PowerType } from "@/Enums/PowerType";
 import { pvpHelpers } from "@/Data/PVPData";
 import drTracker from "@/Core/DRTracker";
 import { RaceType } from "@/Enums/UnitEnums";
+import { DispelPriority } from "@/Data/Dispels";
+import { WoWDispelType } from "@/Enums/Auras";
 
 const auras = {
   moonkinForm: 24858,
@@ -107,6 +109,9 @@ export class DruidBalancePvP extends Behavior {
             this.findRegrowthTarget() !== undefined
           ),
 
+          // Dispels
+          spell.dispel("Remove Corruption", true, DispelPriority.Medium, true, WoWDispelType.Curse, WoWDispelType.Poison),
+
           // Stop casting and allow running away when in bear form and low health or low time to death
           new bt.Decorator(
             ret => me.hasAura(auras.bearForm) &&
@@ -135,7 +140,7 @@ export class DruidBalancePvP extends Behavior {
 
           // Burst damage when conditions are met
           new bt.Decorator(
-            ret => Combat.burstToggle && me.target,
+            ret => Combat.burstToggle && me.target && me.inCombat(),
             this.burstDamage()
           ),
 
@@ -223,6 +228,9 @@ export class DruidBalancePvP extends Behavior {
         this.getAstralPower() >= 40
       ),
 
+      // Dispels
+      spell.dispel("Remove Corruption", true, DispelPriority.Low, true, WoWDispelType.Curse, WoWDispelType.Poison),
+
       // Generate Astral Power - prioritize Wrath
       spell.cast("Wrath", on => me.target)
     );
@@ -249,6 +257,9 @@ export class DruidBalancePvP extends Behavior {
       spell.cast("Starsurge", on => me.target, () =>
         this.getAstralPower() >= 40
       ),
+
+      // Dispels
+      spell.dispel("Remove Corruption", true, DispelPriority.Low, true, WoWDispelType.Curse, WoWDispelType.Poison),
 
       // Default filler - prioritize Wrath over Starfire
       spell.cast("Wrath", on => me.target),
