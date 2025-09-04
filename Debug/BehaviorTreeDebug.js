@@ -21,13 +21,44 @@ export function enableDebug(instance) {
   instance.id = nextId++;
   instance.lastStatus = null;
   instance.lastExecuted = 0;
+  instance.profileHistory = new Array(100);
+  instance.profileHistoryIndex = 0;
+  instance.profileGetAverageTime = () => {
+    let average = 0;
+    let maxValue = 5;
+    for (let n = 0; n < instance.profileHistory.length; ++n) {
+      average += instance.profileHistory[n];
+      if (instance.profileHistory[n] > maxValue) {
+        maxValue = Math.ceil(instance.profileHistory[n]) + 1;
+      }
+    }
+    average /= instance.profileHistory.length;
+    return average;
+  }
+  instance.profileGetAverageTimeStr = () => {
+    /** @type number */
+    const average = instance.profileGetAverageTime();
+    if (String(average) === "NaN") {
+      return "N/A";
+    }
+    return `${average}ms`;
+  }
 
   // Override execute to track status
   const originalExecute = instance.execute;
   instance.execute = function (context) {
+    const profileStartTime = Date.now();
     const status = originalExecute.call(this, context);
+    const profileEndTime = Date.now();
+
     this.lastStatus = status;
     this.lastExecuted = wow.frameTime;
+
+    const profileElapsed = profileEndTime - profileStartTime;
+    instance.profileHistory[instance.profileHistoryIndex++] = profileElapsed;
+    if (instance.profileHistoryIndex == instance.profileHistory.length) {
+      instance.profileHistoryIndex = 0;
+    }
     return status;
   };
 
@@ -37,7 +68,7 @@ export function enableDebug(instance) {
       if (!context.debugEnabled) return;
       const statusStr = this.statusToString(this.lastStatus);
       imgui.pushStyleColor(imgui.Col.Text, this.statusColor(this.lastStatus));
-      if (imgui.treeNode(`Composite${this.id}`, `[${this.id}] ${this.name}: ${statusStr}`)) {
+      if (imgui.treeNode(`Composite${this.id}`, `[${this.id}] ${this.name}: ${statusStr} (${this.profileGetAverageTimeStr()})`)) {
         const childContext = { ...context, depth: (context.depth || 0) + 1 };
         for (let i = 0; i < this.children.length; i++) {
           this.children[i].renderDebug(childContext);
@@ -51,7 +82,7 @@ export function enableDebug(instance) {
       if (!context.debugEnabled) return;
       const statusStr = this.statusToString(this.lastStatus);
       imgui.pushStyleColor(imgui.Col.Text, this.statusColor(this.lastStatus));
-      if (imgui.treeNode(`Composite${this.id}`, `[${this.id}] ${this.name}: ${statusStr}`)) {
+      if (imgui.treeNode(`Composite${this.id}`, `[${this.id}] ${this.name}: ${statusStr} (${this.profileGetAverageTimeStr()})`)) {
         imgui.textColored(this.statusColor(this.lastStatus), `Condition: ${this.lastCondition ? 'True' : 'False'}`);
         const childContext = { ...context, depth: (context.depth || 0) + 1 };
         this.child.renderDebug(childContext);
@@ -63,7 +94,7 @@ export function enableDebug(instance) {
     instance.renderDebug = function (context) {
       if (!context.debugEnabled) return;
       const statusStr = this.statusToString(this.lastStatus);
-      imgui.textColored(this.statusColor(this.lastStatus), `${'  '.repeat(context.depth || 0)}[${this.id}] ${this.name}: ${statusStr}`);
+      imgui.textColored(this.statusColor(this.lastStatus), `${'  '.repeat(context.depth || 0)}[${this.id}] ${this.name}: ${statusStr} (${this.profileGetAverageTimeStr()})`);
     };
   }
 
