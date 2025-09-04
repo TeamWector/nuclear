@@ -9,17 +9,34 @@ import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 import { DispelPriority } from "@/Data/Dispels";
 import { WoWDispelType as DispelType } from "@/Enums/Auras";
 import { PowerType } from '@/Enums/PowerType';
+import KeyBinding from "@/Core/KeyBinding";
 
 export class EjtMageArcaneBehavior extends Behavior {
   name = "[ejt] Mage Arcane";
   context = BehaviorContext.Any;
   specialization = Specialization.Mage.Arcane;
 
+  static settings = [
+    {
+      header: "Burst Toggle System",
+      options: [
+        { type: "checkbox", uid: "UseBurstToggle", text: "Use Burst Toggle", default: true },
+        { type: "hotkey", uid: "BurstToggleKeybind", text: "Burst Toggle Key", default: imgui.Key.X },
+        { type: "checkbox", uid: "BurstModeWindow", text: "Use Window Mode (unchecked = Toggle Mode)", default: false },
+        { type: "slider", uid: "BurstWindowDuration", text: "Burst Window Duration (seconds)", min: 5, max: 60, default: 15 }
+      ]
+    },
+  ];
+
   constructor() {
     super();
 
+    // Initialize the burst toggle keybinding with default
+    KeyBinding.setDefault("BurstToggleKeybind", imgui.Key.F1);
+
     /** @type {wow.CGUnit} */
     this.currentTarget = null;
+    this.gcdMax = 1500;
     this.soulBurst = false;
     this.soulcd = false;
     this.aoeTargetCount = 0;
@@ -29,11 +46,23 @@ export class EjtMageArcaneBehavior extends Behavior {
     this.interruptCondition = null;
     this.showOverlay = new imgui.MutableVariable(false);
     this.useSoulBurst = new imgui.MutableVariable(false);
+    this.burstModeActive = false;
+    this.burstToggleTime = 0;
   }
 
   build() {
     return new bt.Selector("Arcane Mage",
       this.renderOverlay(),
+      new bt.Action(_ => {
+        // Handle burst toggle system
+        this.handleBurstToggle();
+
+        // Legacy: Burst mode toggle with X key (if not using burst toggle system)
+        if (!Settings.UseBurstToggle && imgui.isKeyPressed(imgui.Key.X)) {
+          this.burstModeActive = !this.burstModeActive;
+          console.log(`Burst mode ${this.burstModeActive ? 'ACTIVATED' : 'DEACTIVATED'}`);
+        }
+      }),
       this.preCombat(),
       common.waitForNotMounted(),
       new bt.Action(() => {
@@ -69,13 +98,13 @@ export class EjtMageArcaneBehavior extends Behavior {
           // # Enter cooldowns, then action list depending on your hero talent choices.
           // actions+=/call_action_list,name=cd_opener,if=!variable.soul_cd
           new bt.Decorator(
-            req => !this.soulcd,
+            req => !this.soulcd && this.shouldUseBurstAbilities(),
             this.cd_opener(),
             "Cooldown opener no soul"
           ),
           // actions+=/call_action_list,name=cd_opener_soul,if=variable.soul_cd
           new bt.Decorator(
-            req => this.soulcd,
+            req => this.soulcd && this.shouldUseBurstAbilities(),
             this.cd_opener_soul(),
             "Cooldown opener soul"
           ),
@@ -99,6 +128,47 @@ export class EjtMageArcaneBehavior extends Behavior {
         )
       )
     );
+  }
+
+  handleBurstToggle() {
+    if (!Settings.UseBurstToggle) return;
+
+    // Check for keybind press using the KeyBinding system
+    if (KeyBinding.isPressed("BurstToggleKeybind")) {
+
+      if (!Settings.BurstModeWindow) {
+        // Toggle mode: flip the state
+        combat.burstToggle = !combat.burstToggle;
+        this.burstModeActive = combat.burstToggle;
+        console.log(`Burst toggle ${combat.burstToggle ? 'ACTIVATED' : 'DEACTIVATED'} (Toggle mode)`);
+      } else {
+        // Window mode: start the burst window
+        combat.burstToggle = true;
+        this.burstModeActive = true;
+        this.burstToggleTime = wow.frameTime;
+        console.log(`Burst window ACTIVATED for ${Settings.BurstWindowDuration} seconds`);
+      }
+    }
+
+    // Handle burst window timeout - always check if we're in window mode and burst is active
+    if (Settings.BurstModeWindow && combat.burstToggle && this.burstToggleTime > 0) {
+      const elapsed = (wow.frameTime - this.burstToggleTime) / 1000;
+
+      if (elapsed >= Settings.BurstWindowDuration) {
+        combat.burstToggle = false;
+        this.burstModeActive = false;
+        this.burstToggleTime = 0; // Reset the timer
+        console.log(`Burst window EXPIRED after ${elapsed.toFixed(1)}s`);
+      }
+    }
+  }
+
+  shouldUseBurstAbilities() {
+    if (Settings.UseBurstToggle) {
+      return combat.burstToggle;
+    }
+    // Legacy burst mode for X key
+    return this.burstModeActive;
   }
 
   renderOverlay() {
@@ -180,6 +250,7 @@ export class EjtMageArcaneBehavior extends Behavior {
     return new bt.Decorator(
       ret => !me.inCombat(),
       new bt.Action(ret => {
+        this.gcdMax = 1500 * me.modHaste;
         // # Executed before combat begins. Accepts non-harmful actions only.
         // actions.precombat=arcane_intellect
 
@@ -264,14 +335,14 @@ export class EjtMageArcaneBehavior extends Behavior {
       spell.cast("Arcane Orb", on => this.currentTarget, req => this.facingForOrb() && me.hasAura("High Voltage") && this.opener),
       // # Barrage before Evocation if Tempo will expire
       // actions.cd_opener+=/arcane_barrage,if=buff.arcane_tempo.up&cooldown.evocation.ready&buff.arcane_tempo.remains<gcd.max*5,line_cd=11
-      spell.cast("Arcane Barrage", on => this.currentTarget, req => me.hasVisibleAura("Arcane Tempo") && spell.getCooldown("Evocation")?.ready === true && me.getVisibleAura("Arcane Tempo")?.remaining < 800 * 5),
+      spell.cast("Arcane Barrage", on => this.currentTarget, req => me.hasVisibleAura("Arcane Tempo") && spell.getCooldown("Evocation")?.ready === true && me.getVisibleAura("Arcane Tempo")?.remaining < this.gcdMax * 5),
       // actions.cd_opener+=/evocation,if=cooldown.arcane_surge.remains<(gcd.max*3)&cooldown.touch_of_the_magi.remains<(gcd.max*5)|fight_remains<25
-      spell.cast("Evocation", on => me, req => spell.getCooldown("Arcane Surge")?.timeleft < (1500 * 3) && spell.getCooldown("Touch of the Magi")?.timeleft < (1500 * 5) || this.currentTarget.timeToDeath() > 25),
+      spell.cast("Evocation", on => me, req => spell.getCooldown("Arcane Surge")?.timeleft < (this.gcdMax * 3) && spell.getCooldown("Touch of the Magi")?.timeleft < (this.gcdMax * 5) || this.currentTarget.timeToDeath() > 25),
       // # Use Missiles to get Nether Precision up for your burst window, clipping logic applies as long as you don't have Aether Attunement.
       // actions.cd_opener+=/arcane_missiles,if=(prev_gcd.1.evocation|prev_gcd.1.arcane_surge|variable.opener)&buff.nether_precision.down,interrupt_if=tick_time>gcd.remains&buff.aether_attunement.react=0,interrupt_immediate=1,interrupt_global=1,chain=1,line_cd=30
       this.castArcaneMissiles(req => (/*spell.getLastSuccessfulSpell()?.spellName == "Evocation" || spell.getLastSuccessfulSpell()?.spellName == "Arcane Surge" || */this.opener) && !me.hasVisibleAura("Nether Precision"), interrupt => !spell.isGlobalCooldown() && !me.hasVisibleAura("Aether Attunement")),
       // actions.cd_opener+=/arcane_surge,if=cooldown.touch_of_the_magi.remains<(action.arcane_surge.execute_time+(gcd.max*(buff.arcane_charge.stack=4)))|fight_remains<25
-      spell.cast("Arcane Surge", on => this.currentTarget, req => spell.getCooldown("Touch of the Magi")?.timeleft < (1900 + (1500 * (this.arcaneCharges === 4 ? 1 : 0))) || this.currentTarget.timeToDeath() > 25),
+      spell.cast("Arcane Surge", on => this.currentTarget, req => spell.getCooldown("Touch of the Magi")?.timeleft < (1900 + (this.gcdMax * (this.arcaneCharges === 4 ? 1 : 0))) || this.currentTarget.timeToDeath() > 25),
     );
   }
 
@@ -348,37 +419,38 @@ export class EjtMageArcaneBehavior extends Behavior {
 
   sunfury() {
     return new bt.Selector(
+      spell.cast("Touch of the Magi", on => this.currentTarget, req => spell.getCooldown("Arcane Surge")?.timeleft > 40000 && this.arcaneCharges < 4 && this.currentTarget.timeToDeath() > 15),
       // # For Sunfury, Shifting Power only when you're not under the effect of any cooldowns.
       // actions.sunfury=shifting_power,if=((buff.arcane_surge.down & buff.siphon_storm.down & debuff.touch_of_the_magi.down & cooldown.evocation.remains > 15 & cooldown.touch_of_the_magi.remains > 10) & fight_remains > 10) & buff.arcane_soul.down & (buff.intuition.react = 0 | (buff.intuition.react & buff.intuition.remains > cast_time))
       spell.cast("Shifting Power", on => me, req => ((!me.hasVisibleAura("Arcane Surge") && !me.hasVisibleAura("Siphon Storm") && !this.currentTarget.hasVisibleAuraByMe("Touch of the Magi") && spell.getCooldown("Evocation")?.timeleft > 15000 && spell.getCooldown("Touch of the Magi")?.timeleft > 10000) && this.currentTarget.timeToDeath() > 10) && !me.hasVisibleAura("Arcane Soul") && (!me.hasVisibleAura("Intuition") || (me.hasVisibleAura("Intuition") && me.getVisibleAura("Intuition")?.remaining > 3000/* Shifting power cast time */))),
       // actions.sunfury+=/cancel_buff,name=presence_of_mind,use_off_gcd=1,if=(prev_gcd.1.arcane_blast&buff.presence_of_mind.stack=1)|active_enemies<4
       // actions.sunfury+=/presence_of_mind,if=debuff.touch_of_the_magi.remains<=gcd.max&buff.nether_precision.up&active_enemies<4
-      spell.cast("Presence of Mind", on => me, req => this.currentTarget.getAuraByMe("Touch of the Magi")?.remaining <= 800 && me.hasVisibleAura("Nether Precision") && this.activeEnemies < 4),
+      spell.cast("Presence of Mind", on => me, req => this.currentTarget.getAuraByMe("Touch of the Magi")?.remaining <= this.gcdMax && me.hasVisibleAura("Nether Precision") && this.activeEnemies < 4),
       // actions.sunfury+=/wait,sec=0.05,if=time-action.presence_of_mind.last_used<0.015,line_cd=15
       // # When Arcane Soul is up, use Missiles to generate Nether Precision as needed while also ensuring you end Soul with 3 Clearcasting.
       // actions.sunfury+=/arcane_missiles,if=buff.nether_precision.down&buff.clearcasting.react&buff.arcane_soul.up&buff.arcane_soul.remains>gcd.max*(4-buff.clearcasting.react),interrupt_if=tick_time>gcd.remains,interrupt_immediate=1,interrupt_global=1,chain=1
-      this.castArcaneMissiles(req => !me.hasVisibleAura("Nether Precision") && me.hasVisibleAura("Clearcasting") && me.hasVisibleAura("Arcane Soul") && me.getVisibleAura("Arcane Soul").remaining > 800 * (4000 - me.getVisibleAura("Clearcasting")?.remaining || 0), interrupt => !spell.isGlobalCooldown()),
+      this.castArcaneMissiles(req => !me.hasVisibleAura("Nether Precision") && me.hasVisibleAura("Clearcasting") && me.hasVisibleAura("Arcane Soul") && me.getVisibleAura("Arcane Soul").remaining > this.gcdMax * (4000 - me.getVisibleAura("Clearcasting")?.remaining || 0), interrupt => !spell.isGlobalCooldown()),
       // not sure where to put this, want it often but not mess with CDs. Test out and see if we can lower priority
       spell.cast("Prismatic Barrier", on => me, req => !me.hasVisibleAura("Prismatic Barrier")),
       // actions.sunfury+=/arcane_barrage,if=buff.arcane_soul.up
       spell.cast("Arcane Barrage", on => this.currentTarget, req => me.hasVisibleAura("Arcane Soul")),
       // # Dump a clearcasting proc before you go into Soul if you have one.
       // actions.sunfury+=/arcane_missiles,if=buff.clearcasting.react&buff.arcane_surge.up&buff.arcane_surge.remains<gcd.max,interrupt_if=tick_time>gcd.remains,interrupt_immediate=1,interrupt_global=1,chain=1
-      this.castArcaneMissiles(req => me.hasVisibleAura("Clearcasting") && me.hasVisibleAura("Arcane Surge") && me.getVisibleAura("Arcane Surge")?.remaining < 800, interrupt => !spell.isGlobalCooldown()),
+      this.castArcaneMissiles(req => me.hasVisibleAura("Clearcasting") && me.hasVisibleAura("Arcane Surge") && me.getVisibleAura("Arcane Surge")?.remaining < this.gcdMax, interrupt => !spell.isGlobalCooldown()),
       // # Prioritize Tempo and Intuition if they are about to expire.
       // actions.sunfury+=/arcane_barrage,if=(buff.arcane_tempo.up&buff.arcane_tempo.remains<(gcd.max+(gcd.max*buff.nether_precision.stack=1)))|(buff.intuition.react&buff.intuition.remains<(gcd.max+(gcd.max*buff.nether_precision.stack=1)))
-      spell.cast("Arcane Barrage", on => this.currentTarget, req => (me.hasVisibleAura("Arcane Tempo") && me.getVisibleAura("Arcane Tempo").remaining < (800 + (800 * me.getAuraStacks("Nether Precision") === 1))) || (me.hasVisibleAura("Intuition") && me.getVisibleAura("Intuition").remaining < (800 + (800 * me.getAuraStacks("Nether Precision") === 1)))),
+      spell.cast("Arcane Barrage", on => this.currentTarget, req => (me.hasVisibleAura("Arcane Tempo") && me.getVisibleAura("Arcane Tempo").remaining < (this.gcdMax + (this.gcdMax * me.getAuraStacks("Nether Precision") === 1))) || (me.hasVisibleAura("Intuition") && me.getVisibleAura("Intuition").remaining < (this.gcdMax + (this.gcdMax * me.getAuraStacks("Nether Precision") === 1)))),
       // # Gamble on Orb Barrage in AOE to prevent overcapping on Harmony stacks.
       // actions.sunfury+=/arcane_barrage,if=(talent.orb_barrage&active_enemies>1&buff.arcane_harmony.stack>=18&((active_enemies>3&(talent.resonance|talent.high_voltage))|buff.nether_precision.down|buff.nether_precision.stack=1|(buff.nether_precision.stack=2&buff.clearcasting.react=3)))
       spell.cast("Arcane Barrage", on => this.currentTarget, req => (me.hasAura("Orb Barrage") && this.activeEnemies > 1 && me.getAuraStacks("Arcane Harmony") >= 18 && ((this.activeEnemies > 3 && (me.hasAura("Resonance") || me.hasAura("High Voltage"))) || !me.hasVisibleAura("Nether Precision") || me.getAuraStacks("Nether Precision") === 1 || (me.getAuraStacks("Nether Precision") === 2 && me.getAuraStacks("Clearcasting") === 3)))),
       // # Spend Aether Attunement if you have 4pc S2 set before Touch.
       // actions.sunfury+=/arcane_missiles,if=buff.clearcasting.react&set_bonus.thewarwithin_season_2_4pc&buff.aether_attunement.react&cooldown.touch_of_the_magi.remains<gcd.max*(3-(1.5*(active_enemies>3&(!talent.time_loop|talent.resonance)))),interrupt_if=tick_time>gcd.remains&(buff.aether_attunement.react=0|(active_enemies>3&(!talent.time_loop|talent.resonance))),interrupt_immediate=1,interrupt_global=1,chain=1
-      this.castArcaneMissiles(req => me.hasVisibleAura("Clearcasting") /*&& set_bonus.thewarwithin_season_2_4pc */ && me.hasVisibleAura("Aether Attunement") && spell.getCooldown("Touch of the Magi").timeleft < 1500 * (3000 - (1500 * (this.activeEnemies > 3 && (!me.hasAura("Time Loop") || me.hasAura("Resonance"))))), interrupt => !spell.isGlobalCooldown() && (!me.hasVisibleAura("Aether Attunement") || (this.activeEnemies > 3 && (!me.hasAura("Time Loop") || me.hasAura("Resonance"))))),
+      this.castArcaneMissiles(req => me.hasVisibleAura("Clearcasting") /*&& set_bonus.thewarwithin_season_2_4pc */ && me.hasVisibleAura("Aether Attunement") && spell.getCooldown("Touch of the Magi").timeleft < this.gcdMax * (3000 - (1500 * (this.activeEnemies > 3 && (!me.hasAura("Time Loop") || me.hasAura("Resonance"))))), interrupt => !spell.isGlobalCooldown() && (!me.hasVisibleAura("Aether Attunement") || (this.activeEnemies > 3 && (!me.hasAura("Time Loop") || me.hasAura("Resonance"))))),
       // # Barrage into Touch if you have charges when it comes up.
       // actions.sunfury+=/arcane_barrage,if=buff.arcane_charge.stack=4&((cooldown.touch_of_the_magi.ready)|cooldown.touch_of_the_magi.remains<((travel_time+50)>?gcd.max))&!variable.soul_cd
-      spell.cast("Arcane Barrage", on => this.currentTarget, req => this.arcaneCharges === 4 && spell.getCooldown("Touch of the Magi")?.timeleft < 1500 && !this.soulcd),
+      spell.cast("Arcane Barrage", on => this.currentTarget, req => this.arcaneCharges === 4 && spell.getCooldown("Touch of the Magi")?.timeleft < this.gcdMax && !this.soulcd),
       // actions.sunfury+=/arcane_barrage,if=(cooldown.touch_of_the_magi.ready|(cooldown.touch_of_the_magi.remains<((travel_time+50)>?gcd.max)))&(buff.arcane_surge.down|(buff.arcane_surge.up&buff.arcane_surge.remains<=2.5))&variable.soul_cd
-      spell.cast("Arcane Barrage", on => this.currentTarget, req => spell.getCooldown("Touch of the Magi")?.timeleft < 1500 && (!me.hasVisibleAura("Arcane Surge") || (me.hasVisibleAura("Arcane Surge") && me.getVisibleAura("Arcane Surge").remaining < 2500)) && this.soulcd),
+      spell.cast("Arcane Barrage", on => this.currentTarget, req => spell.getCooldown("Touch of the Magi")?.timeleft < this.gcdMax && (!me.hasVisibleAura("Arcane Surge") || (me.hasVisibleAura("Arcane Surge") && me.getVisibleAura("Arcane Surge").remaining < 2500)) && this.soulcd),
       // # Blast if Magi's Spark is up.
       // actions.sunfury+=/arcane_blast,if=debuff.magis_spark_arcane_blast.up&buff.arcane_charge.stack=4,line_cd=2
       spell.cast("Arcane Blast", on => this.currentTarget, req => this.currentTarget.hasVisibleAuraByMe("Magi's Spark") && this.arcaneCharges === 4),
@@ -390,7 +462,7 @@ export class EjtMageArcaneBehavior extends Behavior {
       // actions.sunfury+=/arcane_barrage,if=(active_enemies>2&talent.orb_barrage&talent.high_voltage&debuff.magis_spark_arcane_blast.down&buff.arcane_charge.stack=4&target.health.pct<35&talent.arcane_bombardment&(buff.nether_precision.up|(buff.nether_precision.down&buff.clearcasting.stack=0)))
       spell.cast("Arcane Barrage", on => this.currentTarget, req => (this.activeEnemies > 2 && me.hasAura("Orb Barrage") && me.hasAura("High Voltage") && !this.currentTarget.hasVisibleAuraByMe("Magi's Spark") && this.arcaneCharges == 4 && this.currentTarget.pctHealth < 35 && me.hasAura("Arcane Bombardment") && (me.hasVisibleAura("Nether Precision") || (!me.hasVisibleAura("Nether Precision") && !me.hasVisibleAura("Clearcasting"))))),
       //actions.sunfury+=/arcane_barrage,if=(active_enemies>2|(active_enemies>1&target.health.pct<35&talent.arcane_bombardment)) &cooldown.arcane_orb.remains<gcd.max&buff.arcane_charge.stack=4&cooldown.touch_of_the_magi.remains>gcd.max*6&(debuff.magis_spark_arcane_blast.down|!talent.magis_spark)&buff.nether_precision.up&(talent.high_voltage|((buff.leydrinker.down|(target.health.pct<35&talent.arcane_bombardment&active_enemies>=4&talent.resonance))&buff.nether_precision.stack=2)|(buff.nether_precision.stack=1&buff.clearcasting.react=0))
-      spell.cast("Arcane Barrage", on => this.currentTarget, req => (this.activeEnemies > 2 || (this.activeEnemies > 1 && this.currentTarget.pctHealth < 35 && me.hasAura("Arcane Bombardment"))) && spell.getCooldown("Arcane Orb")?.timeleft < 800 && this.arcaneCharges == 4 && spell.getCooldown("Touch of the Magi")?.timeleft > 800 * 6 && (this.currentTarget.getAuraByMe("Magi's Spark") == undefined || !me.hasAura("Magi's Spark")) && me.hasVisibleAura("Nether Precision") && (me.hasAura("High Voltage") || ((!me.hasVisibleAura("Leydrinker") || (this.currentTarget.pctHealth < 35 && me.hasAura("Arcane Bombardment") && this.activeEnemies >= 4 && me.hasAura("Resonance"))) && me.getAuraStacks("Nether Precision") == 2) || (me.getAuraStacks("Nether Precision") == 1 && !me.hasVisibleAura("Clearcasting")))),
+      spell.cast("Arcane Barrage", on => this.currentTarget, req => (this.activeEnemies > 2 || (this.activeEnemies > 1 && this.currentTarget.pctHealth < 35 && me.hasAura("Arcane Bombardment"))) && spell.getCooldown("Arcane Orb")?.timeleft < this.gcdMax && this.arcaneCharges == 4 && spell.getCooldown("Touch of the Magi")?.timeleft > this.gcdMax * 6 && (this.currentTarget.getAuraByMe("Magi's Spark") == undefined || !me.hasAura("Magi's Spark")) && me.hasVisibleAura("Nether Precision") && (me.hasAura("High Voltage") || ((!me.hasVisibleAura("Leydrinker") || (this.currentTarget.pctHealth < 35 && me.hasAura("Arcane Bombardment") && this.activeEnemies >= 4 && me.hasAura("Resonance"))) && me.getAuraStacks("Nether Precision") == 2) || (me.getAuraStacks("Nether Precision") == 1 && !me.hasVisibleAura("Clearcasting")))),
       // # Missiles to recoup Charges with High Voltage or maintain Nether Precision and combine it with other Barrage buffs.
       // actions.sunfury+=/arcane_missiles,if=buff.clearcasting.react & ((talent.high_voltage & buff.arcane_charge.stack < 4) | (buff.nether_precision.down &(buff.clearcasting.react > 1 | buff.spellfire_spheres.stack= 6 | buff.burden_of_power.up | buff.glorious_incandescence.up | (buff.intuition.react)))), interrupt_if = tick_time > gcd.remains & (buff.aether_attunement.react = 0 | (active_enemies > 3 & (!talent.time_loop | talent.resonance))), interrupt_immediate = 1, interrupt_global = 1, chain = 1
       this.castArcaneMissiles(req => me.hasVisibleAura("Clearcasting") && ((me.hasAura("High Voltage") && this.arcaneCharges < 4) || (!me.hasVisibleAura("Nether Precision") && (me.hasVisibleAura("Clearcasting") || me.getAuraStacks("Spellfire Spheres") == 6 || me.hasVisibleAura("Burden of Power") || me.hasVisibleAura("Glorious Incandescence") || me.hasVisibleAura("Intuition")))), interrupt => !spell.isGlobalCooldown() && (!me.hasVisibleAura("Aether Attunement") || (this.activeEnemies > 3 && (!me.hasAura("Time Loop") || me.hasAura("Resonance"))))),

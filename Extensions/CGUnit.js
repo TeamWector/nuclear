@@ -34,7 +34,7 @@ Object.defineProperties(wow.CGUnit.prototype, {
 
   auras: {
     get: function () {
-      if (this._cacheAuras === undefined || (this._cacheAurasRefreshTime < wow.frameTime || this.type === wow.ObjectTypeID.ActivePlayer)) {
+      if (this._cacheAuras === undefined || this._cacheAurasRefreshTime < wow.frameTime) {
         this._cacheAuras = originalAurasGetter.call(this);
         this._cacheAurasRefreshTime = wow.frameTime + Settings.AuraCacheTimeMs;
       }
@@ -44,7 +44,7 @@ Object.defineProperties(wow.CGUnit.prototype, {
 
   visibleAuras: {
     get: function () {
-      if (this._cacheVisibleAuras === undefined || (this._cacheVisibleAurasRefreshTime < wow.frameTime || this.type === wow.ObjectTypeID.ActivePlayer)) {
+      if (this._cacheVisibleAuras === undefined || this._cacheVisibleAurasRefreshTime < wow.frameTime) {
         this._cacheVisibleAuras = originalVisibleAurasGetter.call(this);
         this._cacheVisibleAurasRefreshTime = wow.frameTime + Settings.AuraCacheTimeMs;
       }
