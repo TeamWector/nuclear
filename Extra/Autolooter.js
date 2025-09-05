@@ -45,13 +45,13 @@ class Autolooter {
   }
 
   static shouldLoot() {
-    if (!Settings.ExtraAutoloot) return false;
-    if (!Settings.ExtraBreakStealth && this.isInStealth()) return false;
+    if (Settings.ExtraAutoloot === false) return false;
+    if (Settings.ExtraBreakStealth === false && this.isInStealth()) return false;
     if (me.isMoving() || me.isCastingOrChanneling || me.isMounted) return false;
 
-    if (Settings.ExtraIgnoreEnemies) return true;
+    if (Settings.ExtraIgnoreEnemies === true) return true;
 
-    if (!me.inCombat) return true;
+    if (me.inCombat()) return false;
 
     if (!combat.targets || combat.targets.length === 0) return true;
 
