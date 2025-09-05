@@ -45,6 +45,20 @@ class Spell extends wow.EventListener {
           this._lastSuccessfulCastTimes.set(spellName, wow.frameTime);
           this._lastCastTimes.set(spellId, wow.frameTime);
 
+          // Add to spell history array for combo strike tracking
+          this._lastSuccessfulSpells.push({
+            name: castSpell.name, // Use proper case name
+            id: spellId,
+            spellName: spellName, // Keep lowercase for compatibility
+            targetName: targetName,
+            timestamp: wow.frameTime
+          });
+          
+          // Keep only the last 10 spells to prevent memory bloat
+          if (this._lastSuccessfulSpells.length > 10) {
+            this._lastSuccessfulSpells.shift();
+          }
+
           // Check if there's a queued spell before removing it
           const queuedSpell = CommandListener.getNextQueuedSpell();
           if (queuedSpell && queuedSpell.spellName === spellName) {
@@ -678,12 +692,19 @@ class Spell extends wow.EventListener {
     // Only return the most recent spells up to the count
     const limitedResult = result.slice(-Math.min(count, result.length));
 
-    // Remove timestamp if not requested
+    // Return in reverse order (most recent first)
+    const reversedResult = limitedResult.reverse();
 
-    return limitedResult.map(({ spellName, targetName }) => ({ spellName, targetName }));
-
-
-    return limitedResult;
+    if (includeTimestamp) {
+      return reversedResult;
+    } else {
+      return reversedResult.map(({ name, id, spellName, targetName }) => ({ 
+        name, 
+        id, 
+        spellName, 
+        targetName 
+      }));
+    }
   }
 
   /**

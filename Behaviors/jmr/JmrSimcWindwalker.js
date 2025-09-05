@@ -98,8 +98,17 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
   xuenCondition = false;
   xuenDungeonsliceCondition = false;
   xuenDungeonrouteCondition = false;
+  
+  // Fight style detection
+  patchwerk = false;
+  dungeonslice = false;
+  dungeonroute = false;
+  fightRemains = 11111;
   sefDungeonrouteCondition = false;
   smallHotjsActive = false;
+  
+  // Simple combo strike tracking - just track the last combo strike ability
+  lastComboStrikeAbility = null;
 
   constructor() {
     super();
@@ -152,7 +161,9 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         { type: "checkbox", uid: "UseStormEarthAndFire", text: "Use Storm, Earth, and Fire", default: true },
         { type: "checkbox", uid: "UseInvokeXuen", text: "Use Invoke Xuen", default: true },
         { type: "checkbox", uid: "UseStrikeOfTheWindlord", text: "Use Strike of the Windlord", default: true },
-        { type: "checkbox", uid: "UseCelestialConduit", text: "Use Celestial Conduit", default: true }
+        { type: "checkbox", uid: "UseCelestialConduit", text: "Use Celestial Conduit", default: true },
+        { type: "checkbox", uid: "UseTrinkets", text: "Use Trinkets", default: true },
+        { type: "checkbox", uid: "TrinketsWithCooldowns", text: "Use Trinkets with Major Cooldowns Only", default: false }
       ]
     },
     {
@@ -210,7 +221,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
             this.isCycling = true;
             this.currentSpellId = 65000;
             this.lastSpellCycleTime = Date.now();
-            console.info(`Started spell cycling from ${this.currentSpellId.toLocaleString()} to ${this.maxSpellId.toLocaleString()}`);
+            // console.info(`Started spell cycling from ${this.currentSpellId.toLocaleString()} to ${this.maxSpellId.toLocaleString()}`);
           }
         }
 
@@ -228,18 +239,18 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
               if (spellObject) {
                 const spellName = spellObject.name || "Unknown Spell";
                 const targetUnit = me.targetUnit || me;
-                console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Trying spell "${spellName}" (ID: ${spellId})`);
+                // console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Trying spell "${spellName}" (ID: ${spellId})`);
                 
                 const success = spell.castPrimitive(spellObject, targetUnit);
                 if (success) {
-                  console.info(`Successfully cast "${spellName}" on ${targetUnit.unsafeName}`);
+                  // console.info(`Successfully cast "${spellName}" on ${targetUnit.unsafeName}`);
                 } else {
-                  console.info(`Failed to cast "${spellName}"`);
+                  // console.info(`Failed to cast "${spellName}"`);
                 }
               } else {
                 // Only log if we find a valid spell to reduce spam
                 if (spellId % 10000 === 0) {
-                  console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Checking spell ID ${spellId}...`);
+                  // console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Checking spell ID ${spellId}...`);
                 }
               }
               
@@ -247,7 +258,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
               this.lastSpellCycleTime = currentTime;
             } else {
               // Finished cycling through all spells
-              console.info(`Finished cycling through all spell IDs (${this.currentSpellId.toLocaleString()} to ${this.maxSpellId.toLocaleString()})`);
+              // console.info(`Finished cycling through all spell IDs (${this.currentSpellId.toLocaleString()} to ${this.maxSpellId.toLocaleString()})`);
               this.isCycling = false;
               this.currentSpellId = 65000;
             }
@@ -256,6 +267,9 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         
         // Update rotation variables
         this.updateRotationVariables();
+        
+        // Update combo strike tracking
+        this.updateLastComboStrike();
         
         return bt.Status.Failure; // Always continue to the rest of the rotation
       }),
@@ -275,53 +289,60 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       common.waitForCastOrChannel(),
       
       // Precombat preparation
-      new bt.Decorator(
-        () => !me.inCombat(),
-        this.buildPrecombat()
-      ),
+      // new bt.Decorator(
+      //   () => !me.inCombat(),
+      //   this.buildPrecombat()
+      // ),
       
       // Main rotation
       new bt.Selector(
         // Interrupts
         new bt.Decorator(
           () => Settings.UseSpearHandStrike && this.overlayToggles.interrupts.value,
-          spell.interrupt("Spear Hand Strike")
+          spell.interrupt("Spear Hand Strike"),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Defensives
         new bt.Decorator(
           () => this.overlayToggles.defensives.value,
-          this.buildDefensives()
+          this.buildDefensives(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Normal opener for first 4 seconds with <3 enemies
-        new bt.Decorator(
-          () => this.getCombatTime() < 4 && this.getEnemiesInRange(8) < 3,
-          this.buildNormalOpener()
-        ),
+        // new bt.Decorator(
+        //   () => this.getCombatTime() < 4 && me.getEnemies(10).length < 3,
+        //   this.buildNormalOpener(),
+        //   new bt.Action(() => bt.Status.Success)
+        // ),
         
         // Cooldowns
         new bt.Decorator(
-          () => this.hasTalent("Storm, Earth, and Fire") && this.overlayToggles.cooldowns.value,
-          this.buildCooldowns()
+          () => this.overlayToggles.cooldowns.value,
+          this.buildCooldowns(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // AoE rotation for 5+ enemies
         new bt.Decorator(
-          () => this.getEnemiesInRange(8) >= 5,
-          this.buildDefaultAoE()
+          () => me.getEnemies(10).length >= 5,
+          this.buildDefaultAoE(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Cleave rotation for 2-4 enemies
         new bt.Decorator(
-          () => this.getEnemiesInRange(8) > 1 && this.getEnemiesInRange(8) < 5,
-          this.buildDefaultCleave()
+          () => me.getEnemies(10).length > 1 && me.getEnemies(10).length < 5,
+          this.buildDefaultCleave(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Single target rotation
         new bt.Decorator(
-          () => this.getEnemiesInRange(8) < 2,
-          this.buildDefaultST()
+          () => me.getEnemies(10).length < 2,
+          this.buildDefaultST(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Fallback rotation
@@ -336,10 +357,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
   buildPrecombat() {
     return new bt.Selector(
       // Tiger Palm opener
-      spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => !this.wasPreviousSpell("Tiger Palm")),
+      spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => this.comboStrike("Tiger Palm")),
       
       // Rising Sun Kick
-      spell.cast("Rising Sun Kick", on => this.getCurrentTarget())
+      spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Rising Sun Kick")
+      )
     );
   }
 
@@ -348,12 +371,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Vivify with proc
       spell.cast("Vivify", () => 
         Settings.UseVivify && 
-        me.hasAura(auras.vivaciousVivification) && 
+        me.hasVisibleAura(auras.vivaciousVivification) && 
         me.pctHealth <= Settings.VivifyHealthPct
       ),
       
       // Touch of Karma
-      spell.cast("Touch of Karma", on => this.getCurrentTarget(), req => 
+      spell.cast("Touch of Karma", () => this.getCurrentTarget(), req => 
         Settings.UseTouchOfKarma && 
         me.pctHealth <= Settings.TouchOfKarmaHealthPct && 
         this.noDefensivesUp()
@@ -392,6 +415,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       
       // Rising Sun Kick
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Rising Sun Kick") && 
         this.hasTalent("Ordered Elements")
       )
     );
@@ -399,29 +423,90 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
 
   buildCooldowns() {
     return new bt.Selector(
-      // Storm, Earth, and Fire with complex conditions
-      spell.cast("Storm, Earth, and Fire", () => 
-        Settings.UseStormEarthAndFire && 
-        this.shouldUseBurstAbility() && 
-        (this.sefCondition || this.sefDungeonrouteCondition)
-      ),
+      // Trinkets - use with major cooldowns or standalone
+      common.useTrinkets(() => this.getCurrentTarget(), () => {
+        if (!Settings.UseTrinkets) {
+          return false;
+        }
+        
+        const target = this.getCurrentTarget();
+        const inCombat = me.inCombat();
+        const hasTarget = target && !target.deadOrGhost;
+        
+        // If setting is enabled, use trinkets with major cooldowns only
+        if (Settings.TrinketsWithCooldowns) {
+          return me.hasVisibleAura(auras.stormEarthAndFire) || 
+                 me.hasVisibleAura(auras.invokeXuen) ||
+                 me.hasVisibleAura("Bloodlust") ||
+                 me.hasVisibleAura("Heroism") ||
+                 me.hasVisibleAura("Time Warp");
+        }
+        
+        // Otherwise, use trinkets on cooldown in combat
+        return inCombat && hasTarget;
+      }),
+      spell.cast("Storm, Earth, and Fire", () => {
+        if (!Settings.UseStormEarthAndFire || !this.shouldUseBurstAbility()) return false;
+        
+        const target = this.getCurrentTarget();
+        const targetTTD = this.getTargetTimeToDeath();
+        const enemyCount = this.getEnemiesInRange(8);
+        const chi = me.powerByType(PowerType.Chi);
+        const energy = me.powerByType(PowerType.Energy);
+        const combatTime = this.getCombatTime();
+        
+        // (target.time_to_die>14&!fight_style.dungeonroute|target.time_to_die>22)
+        const ttdCondition = (targetTTD > 14 && !this.dungeonroute) || targetTTD > 22;
+        
+        // (active_enemies>2|cooldown.rising_sun_kick.remains|!talent.ordered_elements)
+        const basicCondition = enemyCount > 2 || 
+                              spell.getCooldown("Rising Sun Kick").timeleft > 0 || 
+                              !this.hasTalent("Ordered Elements");
+        
+        // Complex buff and cooldown conditions
+        const invokersDelightRemains = me.getAura(auras.invokersDelight)?.remaining || 0;
+        const bloodlustUp = me.hasVisibleAura("Bloodlust") || me.hasVisibleAura("Heroism") || me.hasVisibleAura("Time Warp");
+        const strikeWindlordRemains = spell.getCooldown("Strike of the Windlord").timeleft;
+        const sefFullRecharge = spell.getCooldown("Storm, Earth, and Fire").charges < 2 ? spell.getCooldown("Storm, Earth, and Fire").timeleft : 0;
+        const xuenRemains = spell.getCooldown("Invoke Xuen, the White Tiger").timeleft;
+        
+        // Main condition logic
+        const mainCondition = ttdCondition && basicCondition && (
+          // Invoker's Delight + Bloodlust condition
+          ((invokersDelightRemains > 10 && !bloodlustUp) || (bloodlustUp && sefFullRecharge < 1)) ||
+          
+          // SEF ready before Xuen condition  
+          (sefFullRecharge < xuenRemains && !bloodlustUp && 
+           (enemyCount > 1 || (strikeWindlordRemains < 2 && (this.hasTalent("Flurry Strikes") || me.hasVisibleAura(auras.heartOfTheJadeSerpentCDR)))) &&
+           (chi > 3 || (chi > 1 && this.hasTalent("Ordered Elements")))) ||
+          
+          // Quick SEF condition
+          (sefFullRecharge < 10 && (chi > 3 || (chi > 1 && this.hasTalent("Ordered Elements")))) ||
+          
+          // Fight ending condition
+          this.fightRemains < 30 ||
+          
+          // Previous Xuen condition
+          this.wasPreviousSpell("Invoke Xuen, the White Tiger") ||
+          
+          // Dungeon slice condition
+          (invokersDelightRemains > 10 && this.dungeonslice && basicCondition)
+        );
+        
+        return mainCondition;
+      }),
       
       // Tiger Palm before Xuen
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         spell.getCooldown("Invoke Xuen, the White Tiger").ready && 
         (me.powerByType(PowerType.Chi) < 5 && !this.hasTalent("Ordered Elements") || me.powerByType(PowerType.Chi) < 3) && 
-        (this.comboStrike("Tiger Palm") || !this.hasTalent("Hit Combo"))
+        (this.comboStrike("Tiger Palm"))
       ),
       
-      // Invoke Xuen
-      spell.cast("Invoke Xuen, the White Tiger", () => 
-        Settings.UseInvokeXuen && 
-        this.shouldUseBurstAbility() && 
-        (this.xuenCondition || this.xuenDungeonsliceCondition || this.xuenDungeonrouteCondition)
-      ),
+      spell.cast(123904, () => me.hasVisibleAura(137639)),
       
       // Touch of Karma
-      spell.cast("Touch of Karma", on => this.getCurrentTarget(), req => 
+      spell.cast("Touch of Karma", () => this.getCurrentTarget(), req => 
         Settings.UseTouchOfKarma && 
         this.overlayToggles.touchOfDeath.value
       ),
@@ -462,8 +547,8 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         this.comboStrike("Tiger Palm") && 
         this.getChiDeficit() >= 2 && 
         me.getAuraStacks(auras.teachingsOfTheMonastery) < this.getTeachingsMaxStacks() && 
-        (this.hasTalent("Energy Burst") && !me.hasAura(auras.bokProc)) && 
-        !me.hasAura(auras.orderedElements)
+        (this.hasTalent("Energy Burst") && !me.hasVisibleAura(auras.bokProc)) && 
+        !me.hasVisibleAura(auras.orderedElements)
       ),
       
       // Touch of Death
@@ -471,12 +556,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         Settings.UseTouchOfDeath && 
         this.overlayToggles.touchOfDeath.value && 
         !this.smallHotjsActive && 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         this.getTouchOfDeathTarget() !== null
       ),
       
       // Strike of the Windlord with 2pc
-      spell.cast("Strike of the Windlord", on => this.getCurrentTarget(), req => 
+      spell.cast("Strike of the Windlord", () => this.getCurrentTarget(), req => 
         Settings.UseStrikeOfTheWindlord && 
         this.hasTalent("Gale Force") && 
         spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000 && 
@@ -495,7 +580,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick with Dance of Chi-Ji
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.danceOfChiji) === 2 && 
-        this.comboStrike("Spinning Crane Kick")
+        this.comboStrike("Spinning Crane Kick") && me.getEnemies(10).length > 1
       ),
       
       // Whirling Dragon Punch
@@ -506,7 +591,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Tiger Palm with Flurry Strikes and 4pc
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.getAuraRemainingTime(auras.stormEarthAndFire) > 2000 && 
+        (me.getAura(auras.stormEarthAndFire)?.remaining || 0) > 2000 && 
         this.hasTalent("Flurry Strikes") && 
         this.getEnergyTimeToMax() <= me.gcd * 3 && 
         spell.getCooldown("Fists of Fury").timeleft > 0 && 
@@ -517,13 +602,13 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Slicing Winds
       EvokerCommon.castEmpowered("Slicing Winds", Settings.SlicingWindsEmpowerLevel, () => this.getCurrentTarget(), () => 
         this.smallHotjsActive || 
-        me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial)
+        me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial)
       ),
       
       // Celestial Conduit
       spell.cast("Celestial Conduit", () => 
         Settings.UseCelestialConduit && 
-        me.hasAura(auras.stormEarthAndFire) && 
+        me.hasVisibleAura(auras.stormEarthAndFire) && 
         spell.getCooldown("Strike of the Windlord").timeleft > 0 && 
         (!this.smallHotjsActive || this.getDebuffRemainingTime(auras.galeForce) < 5000)
       ),
@@ -531,11 +616,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Fists of Fury
       spell.cast("Fists of Fury", on => this.getCurrentTarget(), req => 
         this.comboStrike("Fists of Fury") && 
-        (me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive)
+        (me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive) && me.getEnemies(10).length > 1
       ),
       
       // Rising Sun Kick
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Rising Sun Kick") && 
         spell.getCooldown("Whirling Dragon Punch").timeleft < 2000 && 
         spell.getCooldown("Fists of Fury").timeleft > 1000 && 
         me.getAuraStacks(auras.danceOfChiji) < 2
@@ -544,16 +630,16 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Blackout Kick with proc
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Blackout Kick") && 
-        me.hasAura(auras.bokProc) && 
+        me.hasVisibleAura(auras.bokProc) && 
         me.powerByType(PowerType.Chi) < 2 && 
         this.hasTalent("Energy Burst") && 
         me.powerByType(PowerType.Energy) < 55
       ),
       
       // Strike of the Windlord
-      spell.cast("Strike of the Windlord", on => this.getCurrentTarget(), req => 
+      spell.cast("Strike of the Windlord", () => this.getCurrentTarget(), req => 
         Settings.UseStrikeOfTheWindlord && 
-        (this.getCombatTime() > 5 || (me.hasAura(auras.invokersDelight) && me.hasAura(auras.stormEarthAndFire))) && 
+        (this.getCombatTime() > 5 || (me.hasVisibleAura(auras.invokersDelight) && me.hasVisibleAura(auras.stormEarthAndFire))) && 
         (spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 15000 || this.hasTalent("Flurry Strikes"))
       ),
       
@@ -562,6 +648,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       
       // Blackout Kick with Teachings stacks
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Blackout Kick") && 
         me.getAuraStacks(auras.teachingsOfTheMonastery) === 8 && 
         this.hasTalent("Shadowboxing Treads")
       ),
@@ -578,7 +665,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       spell.cast("Fists of Fury", on => this.getCurrentTarget(), req => 
         (this.hasTalent("Flurry Strikes") || 
         this.hasTalent("Xuen's Battlegear") || 
-        spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000)
+        spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000) && me.getEnemies(10).length > 1
       ),
       
       // Tiger Palm with Flurry Strikes
@@ -586,19 +673,20 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         this.comboStrike("Tiger Palm") && 
         this.getEnergyTimeToMax() <= me.gcd * 3 && 
         this.hasTalent("Flurry Strikes") && 
-        me.hasAura(auras.wisdomOfTheWallFlurry) && 
+        me.hasVisibleAura(auras.wisdomOfTheWallFlurry) && 
         me.powerByType(PowerType.Chi) < 6
       ),
       
       // Spinning Crane Kick with chi
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        me.powerByType(PowerType.Chi) > 5
+        me.powerByType(PowerType.Chi) > 5 && me.getEnemies(10).length > 1
       ),
       
       // Rising Sun Kick with Pressure Point
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.pressurePoint) && 
+        this.comboStrike("Rising Sun Kick") && 
+        me.hasVisibleAura(auras.pressurePoint) && 
         spell.getCooldown("Fists of Fury").timeleft > 2000
       ),
       
@@ -613,18 +701,18 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick with Dance of Chi-Ji
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        me.hasAura(auras.danceOfChiji)
+        me.hasVisibleAura(auras.danceOfChiji) && me.getEnemies(10).length > 1
       ),
       
       // Tiger Palm with chi deficit
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
         this.getChiDeficit() >= 2 && 
-        (!me.hasAura(auras.orderedElements) || this.getEnergyTimeToMax() <= me.gcd * 3)
+        (!me.hasVisibleAura(auras.orderedElements) || this.getEnergyTimeToMax() <= me.gcd * 3)
       ),
       
       // Jadefire Stomp
-      spell.cast("Jadefire Stomp", on => this.getCurrentTarget(), req => 
+      spell.cast("Jadefire Stomp", () => this.getCurrentTarget(), req => 
         (this.hasTalent("Singularly Focused Jade") || this.hasTalent("Jadefire Harmony")) && 
         this.canUseJadefireStomp()
       ),
@@ -632,24 +720,24 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick with conditions
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        (me.powerByType(PowerType.Chi) > 3 || me.powerByType(PowerType.Energy) > 55)
+        (me.powerByType(PowerType.Chi) > 3 || me.powerByType(PowerType.Energy) > 55) && me.getEnemies(10).length > 1
       ),
       
       // Blackout Kick with Fists of Fury on cooldown
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Blackout Kick") && 
         spell.getCooldown("Fists of Fury").timeleft > 0 && 
-        (me.getAuraStacks(auras.teachingsOfTheMonastery) > 3 || me.hasAura(auras.orderedElements)) && 
-        (this.hasTalent("Shadowboxing Treads") || me.hasAura(auras.bokProc))
+        (me.getAuraStacks(auras.teachingsOfTheMonastery) > 3 || me.hasVisibleAura(auras.orderedElements)) && 
+        (this.hasTalent("Shadowboxing Treads") || me.hasVisibleAura(auras.bokProc))
       ),
       
       // Chi Burst
-      spell.cast("Chi Burst", () => !me.hasAura(auras.orderedElements)),
+      spell.cast("Chi Burst", () => !me.hasVisibleAura(auras.orderedElements)),
       
       // Tiger Palm with Ordered Elements
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         this.getChiDeficit() >= 1
       )
     );
@@ -659,12 +747,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
     return new bt.Selector(
       // Rising Sun Kick with Storm, Earth, and Fire
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
-        me.getAuraRemainingTime(auras.stormEarthAndFire) > 13000 && 
+        (me.getAura(auras.stormEarthAndFire)?.remaining || 0) > 13000 && 
         this.comboStrike("Rising Sun Kick")
       ),
       
       // Strike of the Windlord with conditions
-      spell.cast("Strike of the Windlord", on => this.getCurrentTarget(), req => 
+      spell.cast("Strike of the Windlord", () => this.getCurrentTarget(), req => 
         Settings.UseStrikeOfTheWindlord && 
         this.hasTalent("Gale Force") && 
         spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000 && 
@@ -683,7 +771,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick priority
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.danceOfChiji) === 2 && 
-        this.comboStrike("Spinning Crane Kick")
+        this.comboStrike("Spinning Crane Kick") && me.getEnemies(10).length > 1
       ),
       
       // Whirling Dragon Punch
@@ -694,7 +782,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       
       // Rising Sun Kick with Pressure Point
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.pressurePoint) && 
+        me.hasVisibleAura(auras.pressurePoint) && 
         this.getEnemiesInRange(8) < 4 && 
         spell.getCooldown("Fists of Fury").timeleft > 4000
       ),
@@ -706,7 +794,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         (me.powerByType(PowerType.Energy) > 60 && !this.hasTalent("Inner Peace"))) && 
         this.getChiDeficit() >= 2 && 
         me.getAuraStacks(auras.teachingsOfTheMonastery) < this.getTeachingsMaxStacks() && 
-        !me.hasAura(auras.orderedElements)
+        !me.hasVisibleAura(auras.orderedElements)
       ),
       
       // Touch of Death
@@ -714,7 +802,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         Settings.UseTouchOfDeath && 
         this.overlayToggles.touchOfDeath.value && 
         !this.smallHotjsActive && 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         this.getTouchOfDeathTarget() !== null
       ),
       
@@ -726,13 +814,13 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Slicing Winds (general)
       EvokerCommon.castEmpowered("Slicing Winds", Settings.SlicingWindsEmpowerLevel, () => this.getCurrentTarget(), () => 
         this.smallHotjsActive || 
-        me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial)
+        me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial)
       ),
       
       // Celestial Conduit
       spell.cast("Celestial Conduit", () => 
         Settings.UseCelestialConduit && 
-        me.hasAura(auras.stormEarthAndFire) && 
+        me.hasVisibleAura(auras.stormEarthAndFire) && 
         this.getDebuffRemainingTime(auras.galeForce) < 5000 && 
         spell.getCooldown("Strike of the Windlord").timeleft > 0
       ),
@@ -740,11 +828,12 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Fists of Fury
       spell.cast("Fists of Fury", on => this.getCurrentTarget(), req => 
         this.comboStrike("Fists of Fury") && 
-        (me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive)
+        (me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive) && me.getEnemies(10).length > 1
       ),
       
       // Blackout Kick with Teachings stacks
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Blackout Kick") && 
         me.getAuraStacks(auras.teachingsOfTheMonastery) === 8 && 
         (this.getEnemiesInRange(8) < 3 || this.hasTalent("Shadowboxing Treads"))
       ),
@@ -752,7 +841,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Tiger Palm with Flurry Strikes
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.getAuraRemainingTime(auras.stormEarthAndFire) > 2000 && 
+        (me.getAura(auras.stormEarthAndFire)?.remaining || 0) > 2000 && 
         this.hasTalent("Flurry Strikes") && 
         !this.hasTalent("Xuen's Battlegear") && 
         Settings.HasTWW3_4pc
@@ -766,7 +855,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       ),
       
       // Strike of the Windlord (timed)
-      spell.cast("Strike of the Windlord", on => this.getCurrentTarget(), req => 
+      spell.cast("Strike of the Windlord", () => this.getCurrentTarget(), req => 
         Settings.UseStrikeOfTheWindlord && 
         this.getCombatTime() > 5 && 
         (spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 15000 || this.hasTalent("Flurry Strikes")) && 
@@ -787,7 +876,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick (general)
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        me.getAuraStacks(auras.danceOfChiji) === 2
+        me.getAuraStacks(auras.danceOfChiji) === 2 && me.getEnemies(10).length > 1
       ),
       
       // Fists of Fury (general cleave)
@@ -797,37 +886,37 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         (!this.hasTalent("Xuen's Battlegear") && 
         (spell.getCooldown("Strike of the Windlord").timeleft > 1000 || 
         this.smallHotjsActive || 
-        me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial))))
+        me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial)))) && me.getEnemies(10).length > 1
       ),
       
       // Tiger Palm (energy management)
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
         this.getChiDeficit() >= 2 && 
-        (!me.hasAura(auras.orderedElements) || this.getEnergyTimeToMax() <= me.gcd * 3)
+        (!me.hasVisibleAura(auras.orderedElements) || this.getEnergyTimeToMax() <= me.gcd * 3)
       ),
       
       // Blackout Kick (general)
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Blackout Kick") && 
         spell.getCooldown("Fists of Fury").timeleft > 0 && 
-        (me.getAuraStacks(auras.teachingsOfTheMonastery) > 3 || me.hasAura(auras.orderedElements)) && 
-        (this.hasTalent("Shadowboxing Treads") || me.hasAura(auras.bokProc) || me.hasAura(auras.orderedElements))
+        (me.getAuraStacks(auras.teachingsOfTheMonastery) > 3 || me.hasVisibleAura(auras.orderedElements)) && 
+        (this.hasTalent("Shadowboxing Treads") || me.hasVisibleAura(auras.bokProc) || me.hasVisibleAura(auras.orderedElements))
       ),
       
       // Jadefire Stomp
-      spell.cast("Jadefire Stomp", on => this.getCurrentTarget(), req => 
+      spell.cast("Jadefire Stomp", () => this.getCurrentTarget(), req => 
         (this.hasTalent("Singularly Focused Jade") || this.hasTalent("Jadefire Harmony")) && 
         this.canUseJadefireStomp()
       ),
       
       // Chi Burst
-      spell.cast("Chi Burst", () => !me.hasAura(auras.orderedElements)),
+      spell.cast("Chi Burst", () => !me.hasVisibleAura(auras.orderedElements)),
       
       // Tiger Palm with Ordered Elements
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         this.getChiDeficit() >= 1
       )
     );
@@ -838,7 +927,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Rising Sun Kick with Pressure Point
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Rising Sun Kick") && 
-        me.hasAura(auras.pressurePoint) && 
+        me.hasVisibleAura(auras.pressurePoint) && 
         this.smallHotjsActive
       ),
       
@@ -853,7 +942,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
         spell.getCooldown("Celestial Conduit").ready && 
-        me.hasAura(auras.pressurePoint) && 
+        me.hasVisibleAura(auras.pressurePoint) && 
         me.powerByType(PowerType.Chi) < 5 && 
         this.getCombatTime() < 10
       ),
@@ -861,9 +950,9 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Rising Sun Kick priority conditions
       spell.cast("Rising Sun Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Rising Sun Kick") && 
-        (me.hasAura(auras.pressurePoint) && !this.smallHotjsActive && me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) || 
-        me.hasAura(auras.invokersDelight) || 
-        me.hasAura(auras.pressurePoint) && spell.getCooldown("Fists of Fury").timeleft > 0)
+        (me.hasVisibleAura(auras.pressurePoint) && !this.smallHotjsActive && me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) || 
+        me.hasVisibleAura(auras.invokersDelight) || 
+        me.hasVisibleAura(auras.pressurePoint) && spell.getCooldown("Fists of Fury").timeleft > 0)
       ),
       
       // Tiger Palm with energy conditions
@@ -871,21 +960,21 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         me.powerByType(PowerType.Chi) < 5 && 
         this.comboStrike("Tiger Palm") && 
         !this.smallHotjsActive && 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         this.getEnergyTimeToMax() <= me.gcd * 3
       ),
       
       // Tiger Palm with 4pc
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.getAuraRemainingTime(auras.stormEarthAndFire) > 2000 && 
+        (me.getAura(auras.stormEarthAndFire)?.remaining || 0) > 2000 && 
         this.hasTalent("Flurry Strikes") && 
         Settings.HasTWW3_4pc
       ),
       
       // Whirling Dragon Punch
       spell.cast("Whirling Dragon Punch", on => this.getCurrentTarget(), req => 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         me.getAuraStacks(auras.danceOfChiji) !== 2 && 
         !Settings.HasTWW3_2pc
       ),
@@ -893,8 +982,8 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Celestial Conduit
       spell.cast("Celestial Conduit", () => 
         Settings.UseCelestialConduit && 
-        me.hasAura(auras.stormEarthAndFire) && 
-        (!me.hasAura(auras.heartOfTheJadeSerpentCDR) || this.getDebuffRemainingTime(auras.galeForce) < 5000) && 
+        me.hasVisibleAura(auras.stormEarthAndFire) && 
+        (!me.hasVisibleAura(auras.heartOfTheJadeSerpentCDR) || this.getDebuffRemainingTime(auras.galeForce) < 5000) && 
         spell.getCooldown("Strike of the Windlord").timeleft > 0
       ),
       
@@ -903,22 +992,22 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         me.powerByType(PowerType.Chi) < 5 && 
         this.comboStrike("Tiger Palm") && 
         this.smallHotjsActive && 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         this.getEnergyTimeToMax() <= me.gcd * 3
       ),
       
       // Fists of Fury
       spell.cast("Fists of Fury", on => this.getCurrentTarget(), req => 
         this.comboStrike("Fists of Fury") && 
-        (me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive)
+        (me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) || this.smallHotjsActive) && me.getEnemies(10).length > 1
       ),
       
       // Spinning Crane Kick with Dance of Chi-Ji
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.danceOfChiji) === 2 && 
         this.comboStrike("Spinning Crane Kick") && 
-        (!Settings.HasTWW3_2pc || !me.hasAura("Bloodlust")) && 
-        !this.hasTalent("Flurry Strikes")
+        (!Settings.HasTWW3_2pc || !me.hasVisibleAura("Bloodlust")) && 
+        !this.hasTalent("Flurry Strikes") && me.getEnemies(10).length > 1
       ),
       
       // Tiger Palm with complex conditions
@@ -928,7 +1017,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         this.comboStrike("Tiger Palm") && 
         this.getChiDeficit() >= 2 && 
         me.getAuraStacks(auras.teachingsOfTheMonastery) < this.getTeachingsMaxStacks() && 
-        !me.hasAura(auras.orderedElements)
+        !me.hasVisibleAura(auras.orderedElements)
       ),
       
       // Touch of Death
@@ -948,7 +1037,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Blackout Kick with Teachings stacks
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.teachingsOfTheMonastery) > 3 && 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         spell.getCooldown("Rising Sun Kick").timeleft > 1000 && 
         spell.getCooldown("Fists of Fury").timeleft > 2000
       ),
@@ -960,9 +1049,9 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       
       // Whirling Dragon Punch (general ST)
       spell.cast("Whirling Dragon Punch", on => this.getCurrentTarget(), req => 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         me.getAuraStacks(auras.danceOfChiji) !== 2 || 
-        me.hasAura(auras.orderedElements) || 
+        me.hasVisibleAura(auras.orderedElements) || 
         this.hasTalent("Knowledge of the Broken Temple")
       ),
       
@@ -970,7 +1059,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       spell.cast("Crackling Jade Lightning", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.theEmperorsCapacitor) > 19 && 
         !this.smallHotjsActive && 
-        !me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
+        !me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial) && 
         this.comboStrike("Crackling Jade Lightning") && 
         spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000
       ),
@@ -996,9 +1085,9 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
         (!this.hasTalent("Xuen's Battlegear") && 
         (spell.getCooldown("Strike of the Windlord").timeleft > 1000 || 
         this.smallHotjsActive || 
-        me.hasAura(auras.heartOfTheJadeSerpentCDRCelestial)))) && 
+        me.hasVisibleAura(auras.heartOfTheJadeSerpentCDRCelestial)))) && 
         (this.hasTalent("Xuen's Battlegear") && spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 5000 || 
-        spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000)
+        spell.getCooldown("Invoke Xuen, the White Tiger").timeleft > 10000) && me.getEnemies(10).length > 1
       ),
       
       // Tiger Palm with energy management
@@ -1012,20 +1101,22 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.teachingsOfTheMonastery) > 7 && 
         this.hasTalent("Memory of the Monastery") && 
-        !me.hasAura(auras.memoryOfTheMonastery) && 
+        !me.hasVisibleAura(auras.memoryOfTheMonastery) && 
         spell.getCooldown("Fists of Fury").timeleft > 0
       ),
       
       // Spinning Crane Kick with Dance of Chi-Ji
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         (me.getAuraStacks(auras.danceOfChiji) === 2 || 
-        (me.getAuraRemainingTime(auras.danceOfChiji) < 2000 && me.hasAura(auras.danceOfChiji))) && 
+        ((me.getAura(auras.danceOfChiji)?.remaining || 0) < 2000 && me.hasVisibleAura(auras.danceOfChiji))) && 
         this.comboStrike("Spinning Crane Kick") && 
-        !me.hasAura(auras.orderedElements)
+        !me.hasVisibleAura(auras.orderedElements) && me.getEnemies(10).length > 1
       ),
       
       // Whirling Dragon Punch (fallback)
-      spell.cast("Whirling Dragon Punch", on => this.getCurrentTarget()),
+      spell.cast("Whirling Dragon Punch", on => this.getCurrentTarget(), req => 
+        this.comboStrike("Whirling Dragon Punch")
+      ),
       
       // Blackout Kick with procs
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
@@ -1036,15 +1127,15 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       
       // Spinning Crane Kick with 2pc
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.danceOfChiji) && 
+        me.hasVisibleAura(auras.danceOfChiji) && 
         Settings.HasTWW3_2pc && 
-        this.comboStrike("Spinning Crane Kick")
+        this.comboStrike("Spinning Crane Kick") && me.getEnemies(10).length > 1
       ),
       
       // Blackout Kick with Ordered Elements
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Blackout Kick") && 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         spell.getCooldown("Rising Sun Kick").timeleft > 1000 && 
         spell.getCooldown("Fists of Fury").timeleft > 2000
       ),
@@ -1059,55 +1150,57 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick with Dance of Chi-Ji
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        me.hasAura(auras.danceOfChiji) && 
-        (me.hasAura(auras.orderedElements) || 
-        this.getEnergyTimeToMax() >= me.gcd * 3)
+        me.hasVisibleAura(auras.danceOfChiji) && 
+        (me.hasVisibleAura(auras.orderedElements) || 
+        this.getEnergyTimeToMax() >= me.gcd * 3) && me.getEnemies(10).length > 1
       ),
       
       // Jadefire Stomp
-      spell.cast("Jadefire Stomp", on => this.getCurrentTarget(), req => 
+      spell.cast("Jadefire Stomp", () => this.getCurrentTarget(), req => 
         (this.hasTalent("Singularly Focused Jade") || this.hasTalent("Jadefire Harmony")) && 
         this.canUseJadefireStomp()
       ),
       
       // Chi Burst
-      spell.cast("Chi Burst", () => !me.hasAura(auras.orderedElements)),
+      spell.cast("Chi Burst", () => !me.hasVisibleAura(auras.orderedElements)),
+      spell.cast("Chi Wave", () => !me.hasVisibleAura(auras.orderedElements)),
       
       // Blackout Kick (general ST)
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Blackout Kick") && 
-        (me.hasAura(auras.orderedElements) || 
-        (me.hasAura(auras.bokProc) && this.getChiDeficit() >= 1 && this.hasTalent("Energy Burst"))) && 
+        (me.hasVisibleAura(auras.orderedElements) || 
+        (me.hasVisibleAura(auras.bokProc) && this.getChiDeficit() >= 1 && this.hasTalent("Energy Burst"))) && 
         spell.getCooldown("Fists of Fury").timeleft > 0
       ),
       
       // Tiger Palm with Ordered Elements
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
         this.comboStrike("Tiger Palm") && 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         this.getChiDeficit() >= 1
       ),
       
       // Chi Burst (fallback)
       spell.cast("Chi Burst"),
+      spell.cast("Chi Wave"),
       
       // Spinning Crane Kick with Hit Combo
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         this.comboStrike("Spinning Crane Kick") && 
-        me.hasAura(auras.orderedElements) && 
-        this.hasTalent("Hit Combo")
+        me.hasVisibleAura(auras.orderedElements) && 
+        this.hasTalent("Hit Combo") && me.getEnemies(10).length > 1
       ),
       
       // Blackout Kick without Hit Combo
       spell.cast("Blackout Kick", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.orderedElements) && 
+        me.hasVisibleAura(auras.orderedElements) && 
         !this.hasTalent("Hit Combo") && 
         spell.getCooldown("Fists of Fury").timeleft > 0
       ),
       
       // Tiger Palm (previous Tiger Palm condition)
       spell.cast("Tiger Palm", on => this.getCurrentTarget(), req => 
-        this.wasPreviousSpell("Tiger Palm") && 
+        this.comboStrike("Tiger Palm") && 
         me.powerByType(PowerType.Chi) < 3 && 
         spell.getCooldown("Fists of Fury").ready
       )
@@ -1119,7 +1212,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Spinning Crane Kick
       spell.cast("Spinning Crane Kick", on => this.getCurrentTarget(), req => 
         me.powerByType(PowerType.Chi) > 5 && 
-        this.comboStrike("Spinning Crane Kick")
+        this.comboStrike("Spinning Crane Kick") && me.getEnemies(10).length > 1
       ),
       
       // Blackout Kick
@@ -1148,34 +1241,34 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
       // Other racials when Storm, Earth, and Fire is down
       spell.cast("Bag of Tricks", () => 
         Settings.UseBagOfTricks && 
-        !me.hasAura(auras.stormEarthAndFire)
+        !me.hasVisibleAura(auras.stormEarthAndFire)
       ),
       
       spell.cast("Light's Judgment", () => 
         Settings.UseLightsJudgment && 
-        !me.hasAura(auras.stormEarthAndFire)
+        !me.hasVisibleAura(auras.stormEarthAndFire)
       ),
       
       spell.cast("Haymaker", () => 
         Settings.UseHaymaker && 
-        !me.hasAura(auras.stormEarthAndFire)
+        !me.hasVisibleAura(auras.stormEarthAndFire)
       ),
       
       spell.cast("Rocket Barrage", () => 
         Settings.UseRocketBarrage && 
-        !me.hasAura(auras.stormEarthAndFire)
+        !me.hasVisibleAura(auras.stormEarthAndFire)
       ),
       
       spell.cast("Arcane Pulse", () => 
         Settings.UseArcanePulse && 
-        !me.hasAura(auras.stormEarthAndFire)
+        !me.hasVisibleAura(auras.stormEarthAndFire)
       )
     );
   }
 
   // Helper methods
   getCurrentTarget() {
-    const targetPredicate = unit => common.validTarget(unit) && me.distanceTo(unit) <= 40 && me.isFacing(unit);
+    const targetPredicate = unit => common.validTarget(unit) && me.isWithinMeleeRange(unit) && me.isFacing(unit);
     const target = me.target;
     if (target !== null && targetPredicate(target)) {
       return target;
@@ -1188,7 +1281,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
   }
 
   getCombatTime() {
-    return wow.frameTime / 1000; // Convert to seconds
+    return wow.frameTime / 1000;
   }
 
   getTargetTimeToDeath() {
@@ -1200,10 +1293,7 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
     return me.hasAura(talentName);
   }
 
-  getAuraRemainingTime(auraId) {
-    const aura = me.getAura(auraId);
-    return aura ? aura.remaining : 0;
-  }
+
 
   getDebuffRemainingTime(debuffId) {
     const target = this.getCurrentTarget();
@@ -1228,26 +1318,64 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
   }
 
   comboStrike(spellName) {
-    // Check if the spell was not the previous spell cast
+    // Check if the spell was not the previous spell cast (Hit Combo requirement)
     return !this.wasPreviousSpell(spellName);
   }
 
   wasPreviousSpell(spellName) {
-    // This would need to be implemented based on available API
-    // For now, return false to allow all combo strikes
-    return false;
+    // Simple check: was this spell the last combo strike ability we tracked?
+    const matches = this.lastComboStrikeAbility === spellName;
+    
+    //console.info(`[Windwalker] Last: ${this.lastComboStrikeAbility || 'none'}, Checking: ${spellName}, ${matches ? 'BLOCKED' : 'ALLOWED'}`);
+    
+    return matches;
+  }
+  
+  // Update the last combo strike ability when we cast one
+  updateLastComboStrike() {
+    const allSpells = spell.getLastSuccessfulSpells(1); // Just get the most recent spell
+    if (!allSpells || allSpells.length === 0) return;
+    
+    const lastSpell = allSpells[0];
+    if (lastSpell && lastSpell.name) {
+      // Check if it's a combo strike ability
+      const comboStrikeAbilities = [
+        "Tiger Palm",
+        "Blackout Kick", 
+        "Rising Sun Kick",
+        "Spinning Crane Kick",
+        "Fists of Fury",
+        "Crackling Jade Lightning",
+        "Whirling Dragon Punch"
+      ];
+      
+      if (comboStrikeAbilities.includes(lastSpell.name)) {
+        this.lastComboStrikeAbility = lastSpell.name;
+        //console.info(`[Windwalker] Updated last combo strike: ${lastSpell.name}`);
+      }
+    }
+  }
+  
+  // Helper method to get current target
+  getCurrentTarget() {
+    const targetPredicate = unit => common.validTarget(unit) && me.distanceTo(unit) <= 40 && me.isFacing(unit);
+    const target = me.target;
+    if (target !== null && targetPredicate(target)) {
+      return target;
+    }
+    return combat.targets.find(targetPredicate) || null;
   }
 
   noDefensivesUp() {
-    return !me.hasAura(auras.fortifyingBrew) && 
-           !me.hasAura(auras.dampenHarm) && 
-           !me.hasAura(auras.diffuseMagic) && 
-           !me.hasAura(auras.touchOfKarma);
+    return !me.hasVisibleAura(auras.fortifyingBrew) && 
+           !me.hasVisibleAura(auras.dampenHarm) && 
+           !me.hasVisibleAura(auras.diffuseMagic) && 
+           !me.hasVisibleAura(auras.touchOfKarma);
   }
 
   getTouchOfDeathTarget() {
     // Check if Touch of Death is ready or we have the Hidden Master's Forbidden Touch buff
-    if (!spell.getCooldown("Touch of Death").ready && !me.hasAura("Hidden Master's Forbidden Touch")) {
+    if (!spell.getCooldown("Touch of Death").ready && !me.hasVisibleAura("Hidden Master's Forbidden Touch")) {
       return null;
     }
     
@@ -1307,28 +1435,66 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
   }
 
   shouldUseRacialWithXuen() {
-    return me.getAuraRemainingTime(auras.invokeXuen) > 15000 || 
+    return (me.getAura(auras.invokeXuen)?.remaining || 0) > 15000 || 
            !this.hasTalent("Invoke Xuen, the White Tiger") || 
            this.getTargetTimeToDeath() < 20;
   }
 
   updateRotationVariables() {
     // Update small_hotjs_active
-    this.smallHotjsActive = me.hasAura(auras.heartOfTheJadeSerpentCDR) || me.hasAura(auras.heartOfTheJadeSerpentTWW3Tier);
+    this.smallHotjsActive = me.hasVisibleAura(auras.heartOfTheJadeSerpentCDR) || me.hasAura(auras.heartOfTheJadeSerpentTWW3Tier);
     
-    // Update complex condition variables (simplified for now)
+    // Update fight style detection
+    this.patchwerk = false; // Simplified - would need specific boss detection
+    this.fightRemains = this.getTargetTimeToDeath();
+    this.dungeonslice = me.inInstance && !me.inRaid && this.fightRemains < 20;
+    this.dungeonroute = me.inInstance && !me.inRaid;
+    
+    // Update complex condition variables using Lua logic
     const target = this.getCurrentTarget();
     const targetTTD = this.getTargetTimeToDeath();
     const enemyCount = this.getEnemiesInRange(8);
+    const chi = me.powerByType(PowerType.Chi);
+    const energy = me.powerByType(PowerType.Energy);
+    const combatTime = this.getCombatTime();
     
-    // SEF condition (simplified)
+    // Get important cooldown and buff info
+    const invokersDelightRemains = me.getAura(auras.invokersDelight)?.remaining || 0;
+    const bloodlustUp = me.hasVisibleAura("Bloodlust") || me.hasVisibleAura("Heroism") || me.hasVisibleAura("Time Warp");
+    const strikeWindlordRemains = spell.getCooldown("Strike of the Windlord").timeleft;
+    const sefFullRecharge = spell.getCooldown("Storm, Earth, and Fire").charges < 2 ? spell.getCooldown("Storm, Earth, and Fire").timeleft : 0;
+    const xuenRemains = spell.getCooldown("Invoke Xuen, the White Tiger").timeleft;
+    const fistsRemains = spell.getCooldown("Fists of Fury").timeleft;
+    const capacitorStacks = me.getAuraStacks(auras.theEmperorsCapacitor);
+    
+    // SEF condition from Lua (full logic)
     this.sefCondition = targetTTD > 6 && 
-                      (spell.getCooldown("Rising Sun Kick").timeleft > 0 || enemyCount > 2 || !this.hasTalent("Ordered Elements"));
+      (spell.getCooldown("Rising Sun Kick").timeleft > 0 || enemyCount > 2 || !this.hasTalent("Ordered Elements")) &&
+      (this.wasPreviousSpell("Invoke Xuen, the White Tiger") ||
+       ((this.hasTalent("Celestial Conduit") || !this.hasTalent("Last Emperor's Capacitor")) && 
+        bloodlustUp && (strikeWindlordRemains < 5 || !this.hasTalent("Strike of the Windlord")) && 
+        this.hasTalent("Sequenced Strikes")) ||
+       invokersDelightRemains > 15 ||
+       ((strikeWindlordRemains < 5 || !this.hasTalent("Strike of the Windlord")) && 
+        sefFullRecharge < xuenRemains && fistsRemains < 5 && 
+        (!this.hasTalent("Last Emperor's Capacitor") || this.hasTalent("Celestial Conduit"))) ||
+       (this.hasTalent("Last Emperor's Capacitor") && capacitorStacks > 17 && 
+        xuenRemains > sefFullRecharge) ||
+       this.fightRemains < 30 ||
+       (invokersDelightRemains > 15 && this.dungeonslice && 
+        (spell.getCooldown("Rising Sun Kick").timeleft > 0 || enemyCount > 2 || !this.hasTalent("Ordered Elements"))));
     
-    // Xuen condition (simplified)
-    this.xuenCondition = spell.getCooldown("Storm, Earth, and Fire").ready && 
-                        targetTTD > 14 && 
-                        (enemyCount > 2 || target?.hasAura(auras.acclamation));
+    // Xuen condition from Lua (full logic)  
+    this.xuenCondition = ((this.dungeonslice && enemyCount === 1 && 
+                          (combatTime < 10 || (this.hasTalent("Xuen's Bond") && this.hasTalent("Celestial Conduit")))) || 
+                         !this.dungeonslice || enemyCount > 1) &&
+                        spell.getCooldown("Storm, Earth, and Fire").ready &&
+                        ((targetTTD > 14 && !this.dungeonroute) || targetTTD > 22) &&
+                        (enemyCount > 2 || target?.hasVisibleAura(auras.acclamation) || 
+                         (!this.hasTalent("Ordered Elements") && combatTime < 5)) &&
+                        ((chi > 2 && this.hasTalent("Ordered Elements")) || chi > 5 || 
+                         (chi > 3 && energy < 50) || (energy < 50 && enemyCount === 1) ||
+                         (this.wasPreviousSpell("Tiger Palm") && !this.hasTalent("Ordered Elements") && combatTime < 5));
     
     // Count Xuen invocations
     if (this.wasPreviousSpell("Invoke Xuen, the White Tiger")) {
@@ -1425,6 +1591,14 @@ export class JmrSimcWindwalkerBehavior extends Behavior {
           const teachingsColor = teachingsStacks >= maxTeachings ? 
             { r: 1.0, g: 0.2, b: 0.2, a: 1.0 } : { r: 0.8, g: 0.8, b: 0.8, a: 1.0 };
           imgui.textColored(teachingsColor, `Teachings: ${teachingsStacks}/${maxTeachings}`);
+        }
+        
+        // Last combo strike ability
+        if (this.lastComboStrikeAbility) {
+          const comboColor = { r: 0.8, g: 0.2, b: 1.0, a: 1.0 }; // Purple for combo tracking
+          imgui.textColored(comboColor, `Last Combo: ${this.lastComboStrikeAbility}`);
+        } else {
+          imgui.textColored({ r: 0.6, g: 0.6, b: 0.6, a: 1.0 }, "Last Combo: None");
         }
         
         imgui.unindent();

@@ -98,14 +98,21 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
       ]
     },
     {
+      header: "Threat Management",
+      options: [
+        { type: "checkbox", uid: "UseThreatGathering", text: "Use Threat Gathering", default: true },
+        { type: "checkbox", uid: "ThreatGatheringDebug", text: "Debug Threat Targeting", default: false }
+      ]
+    },
+    {
       header: "Defensive Settings",
       options: [
         { type: "checkbox", uid: "UseFortifyingBrew", text: "Use Fortifying Brew", default: true },
-        { type: "slider", uid: "FortifyingBrewHealthPct", text: "Fortifying Brew Health %", min: 1, max: 100, default: 35 },
+        { type: "slider", uid: "FortifyingBrewHealthPct", text: "Fortifying Brew Health %", min: 1, max: 100, default: 40 },
         { type: "checkbox", uid: "UseDampenHarm", text: "Use Dampen Harm", default: true },
         { type: "slider", uid: "DampenHarmHealthPct", text: "Dampen Harm Health %", min: 1, max: 100, default: 50 },
         { type: "checkbox", uid: "UseDiffuseMagic", text: "Use Diffuse Magic", default: true },
-        { type: "slider", uid: "DiffuseMagicHealthPct", text: "Diffuse Magic Health %", min: 1, max: 100, default: 20 },
+        { type: "slider", uid: "DiffuseMagicHealthPct", text: "Diffuse Magic Health %", min: 1, max: 100, default: 80 },
         { type: "checkbox", uid: "UseExpelHarmLow", text: "Use Expel Harm (Low Orbs)", default: true },
         { type: "slider", uid: "ExpelHarmLowHealthPct", text: "Expel Harm Low Health %", min: 1, max: 100, default: 50 },
         { type: "checkbox", uid: "UseExpelHarmHigh", text: "Use Expel Harm (High Orbs)", default: true },
@@ -121,6 +128,7 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
     {
       header: "Interrupts & Utility",
       options: [
+        { type: "checkbox", uid: "UseProvoke", text: "Taunt", default: true },
         { type: "checkbox", uid: "UseSpearHandStrike", text: "Use Spear Hand Strike (Interrupt)", default: true }
       ]
     },
@@ -311,6 +319,36 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
         (spell.getCharges("Celestial Brew") > 1.8 || 
         (spell.getCharges("Celestial Brew") > 1.2 && spell.getCooldown("Black Ox Brew").ready))
       ),
+
+      spell.cast("Celestial Infusion", () => 
+        this.getAspectOfHarmonyValue() > 0.3 * me.maxHealth && 
+        me.hasAura(auras.weaponsOfOrder) && 
+        !this.getCurrentTarget()?.hasAura(auras.aspectOfHarmonyDamage)
+      ),
+      
+      spell.cast("Celestial Infusion", () => 
+        this.getAspectOfHarmonyValue() > 0.3 * me.maxHealth && 
+        !this.hasTalent("Weapons of Order") && 
+        !this.getCurrentTarget()?.hasAura(auras.aspectOfHarmonyDamage)
+      ),
+      
+      spell.cast("Celestial Infusion", () => 
+        this.getTargetTimeToDeath() < 20 && 
+        this.getTargetTimeToDeath() > 14 && 
+        this.getAspectOfHarmonyValue() > 0.2 * me.maxHealth
+      ),
+      
+      spell.cast("Celestial Infusion", () => 
+        this.getAspectOfHarmonyValue() > 0.3 * me.maxHealth && 
+        spell.getCooldown("Weapons of Order").timeleft > 20000 && 
+        !this.getCurrentTarget()?.hasAura(auras.aspectOfHarmonyDamage)
+      ),
+      
+      spell.cast("Celestial Infusion", () => 
+        !me.hasAura(auras.blackoutComboBuff) && 
+        (spell.getCharges("Celestial Infusion") > 1.8 || 
+        (spell.getCharges("Celestial Infusion") > 1.2 && spell.getCooldown("Black Ox Brew").ready))
+      ),
       
       // Purifying Brew
       spell.cast("Purifying Brew", () => 
@@ -376,11 +414,25 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
 
   buildMainRotation() {
     return new bt.Selector(
+      // Threat gathering with Crackling Jade Lightning (ranged enemies)
+      spell.cast("Crackling Jade Lightning", on => this.getThreatTargetRanged(), req => 
+        Settings.UseThreatGathering && 
+        this.getThreatTargetRanged() !== null && 
+        me.distanceTo(this.getThreatTargetRanged()) > 10
+      ),
+      
+      // Threat gathering with Spinning Crane Kick (melee enemies)  
+      spell.cast("Spinning Crane Kick", on => this.getThreatTargetMelee(), req => 
+        Settings.UseThreatGathering && 
+        this.getThreatTargetMelee() !== null && 
+        me.distanceTo(this.getThreatTargetMelee()) <= 10
+      ),
+      
       // Black Ox Brew
       spell.cast("Black Ox Brew", () => 
         Settings.UseBlackOxBrew && 
         me.powerByType(PowerType.Energy) < 40 && 
-        (!this.hasTalent("Aspect of Harmony") || spell.getCharges("Celestial Brew") < 1)
+        (!this.hasTalent("Aspect of Harmony") || (spell.getCharges("Celestial Brew") < 1 || spell.getCharges("Celestial Infusion") < 1))
       ),
       
       // Touch of Death
@@ -404,16 +456,20 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
         this.overlayToggles.cooldowns.value && 
         this.shouldUseBurstAbility()
       ),
+
+      spell.cast(1241059, () => 
+        spell.getCharges(1241059) > 1
+      ),
       
       // Invoke Niuzao
-      spell.cast("Invoke Niuzao", () => 
+      spell.cast("Invoke Niuzao, the Black Ox", () => 
         Settings.UseInvokeNiuzao && 
         this.overlayToggles.cooldowns.value && 
         this.shouldUseBurstAbility() && 
         !this.hasTalent("Call to Arms")
       ),
       
-      spell.cast("Invoke Niuzao", () => 
+      spell.cast("Invoke Niuzao, the Black Ox", () => 
         Settings.UseInvokeNiuzao && 
         this.overlayToggles.cooldowns.value && 
         this.shouldUseBurstAbility() && 
@@ -582,6 +638,10 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
     return false;
   }
 
+  getUntankedTarget() {
+    return combat.targets.find(unit => unit.inCombat() && unit.target && !unit.isTanking());
+  }
+
   getStaggerPercentage() {
     // Estimate stagger percentage based on which stagger level we have
     if (me.hasAura(auras.heavyStagger)) return 60;
@@ -591,14 +651,17 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
   }
 
   shouldUseDiffuseMagic() {
-    // Check if enemies are casting magic spells
-    const enemies = me.getEnemies();
-    for (const enemy of enemies) {
-      if (enemy && enemy.isCastingOrChanneling && me.distanceTo(enemy) <= 40) {
-        return true;
+    const enemiesCasting = combat.targets.filter(enemy => {
+      if (enemy.isCastingOrChanneling && enemy.spellInfo) {
+        const target = enemy.spellInfo.spellTargetGuid;
+        if (target && target.equals(me.guid)) {
+          const castRemains = enemy.spellInfo.castEnd - wow.frameTime;
+          return castRemains < 1500;
+        }
       }
-    }
-    return false;
+      return false;
+    });
+    return enemiesCasting.length > 1;
   }
 
   getTouchOfDeathTarget() {
@@ -628,6 +691,147 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
       }
     }
     return null;
+  }
+  
+  // Get ranged enemy that needs threat (for Crackling Jade Lightning)
+  getThreatTargetRanged() {
+    const enemies = combat.targets.filter(target => 
+      common.validTarget(target) && 
+      me.distanceTo(target) > 10 && 
+      me.distanceTo(target) <= 40 && 
+      me.isFacing(target)
+    );
+    
+    return this.findEnemyWithoutOurThreat(enemies);
+  }
+  
+  // Get melee enemy that needs threat (for Spinning Crane Kick)
+  getThreatTargetMelee() {
+    const enemies = combat.targets.filter(target => 
+      common.validTarget(target) && 
+      me.distanceTo(target) <= 10 && 
+      me.isFacing(target)
+    );
+    
+    return this.findEnemyWithoutOurThreat(enemies);
+  }
+  
+  // Find enemy that other players have threat on but we don't
+  findEnemyWithoutOurThreat(enemies) {
+    for (const enemy of enemies) {
+      if (!enemy || enemy.deadOrGhost) continue;
+      
+      try {
+        // Check if enemy has threat entries
+        if (enemy.threatEntries && enemy.threatEntries.length > 0) {
+          let weHaveThreat = false;
+          let othersHaveThreat = false;
+          
+          // Check threat entries
+          for (const threatEntry of enemy.threatEntries) {
+            if (threatEntry.guid && threatEntry.guid.equals(me.guid)) {
+              weHaveThreat = true;
+            } else if (threatEntry.guid) {
+              // Check if it's a party/raid member with threat
+              const threatUnit = threatEntry.guid.toUnit();
+              if (threatUnit && threatUnit.isPlayer() && !threatUnit.inCombatWith(me)) {
+                // Check if this unit is a tank - if so, don't steal threat from them
+                if (this.isUnitATank(threatUnit)) {
+                  if (Settings.ThreatGatheringDebug) {
+                    console.log(`[Brewmaster] Skipping ${enemy.unsafeName} - tank ${threatUnit.unsafeName} has threat`);
+                  }
+                  return null; // Don't steal from other tanks
+                }
+                othersHaveThreat = true;
+              }
+            }
+          }
+          
+          // If others have threat but we don't, this is a good target
+          if (othersHaveThreat && !weHaveThreat) {
+            if (Settings.ThreatGatheringDebug) {
+              console.log(`[Brewmaster] Found threat target: ${enemy.unsafeName} (others have threat, we don't)`);
+            }
+            return enemy;
+          }
+        }
+      } catch (error) {
+        // Ignore errors accessing threat data
+        if (Settings.ThreatGatheringDebug) {
+          console.warn(`[Brewmaster] Error checking threat for ${enemy.unsafeName}: ${error.message}`);
+        }
+      }
+    }
+    
+    if (Settings.ThreatGatheringDebug) {
+      console.log(`[Brewmaster] No threat targets found`);
+    }
+    return null;
+  }
+  
+  // Check if a unit is a tank based on their auras
+  isUnitATank(unit) {
+    if (!unit) return false;
+    
+    try {
+      // Check for tank-specific auras/stances
+      const tankAuras = [
+        // Brewmaster Monk
+        "Stagger", "Brewmaster Monk", "Shuffle",
+        
+        // Protection Paladin  
+        "Protection Paladin", "Shield of the Righteous",
+        
+        // Guardian Druid
+        "Guardian Druid",
+        
+        // Vengeance Demon Hunter
+        "Vengeance", "Demon Spikes",
+        
+        // Blood Death Knight
+        "Blood", "Death Knight", "Bone Shield", "Vampiric Blood",
+        
+        // Protection Warrior
+        "Protection Warrior", "Shield Block", "Defensive Stance"
+      ];
+      
+      // Check visible auras for tank indicators
+      for (const aura of tankAuras) {
+        if (unit.hasVisibleAura(aura) || unit.hasAura(aura)) {
+          if (Settings.ThreatGatheringDebug) {
+            console.log(`[Brewmaster] Detected tank: ${unit.unsafeName} has ${aura}`);
+          }
+          return true;
+        }
+      }
+      
+      // Check specialization if available (more reliable)
+      if (unit.specialization) {
+        const tankSpecs = [
+          268, // Brewmaster Monk
+          66,  // Protection Paladin
+          104, // Guardian Druid
+          581, // Vengeance Demon Hunter
+          250, // Blood Death Knight
+          73   // Protection Warrior
+        ];
+        
+        if (tankSpecs.includes(unit.specialization)) {
+          if (Settings.ThreatGatheringDebug) {
+            console.log(`[Brewmaster] Detected tank by spec: ${unit.unsafeName} (${unit.specialization})`);
+          }
+          return true;
+        }
+      }
+      
+    } catch (error) {
+      // Ignore errors checking tank status
+      if (Settings.ThreatGatheringDebug) {
+        console.warn(`[Brewmaster] Error checking tank status for ${unit.unsafeName}: ${error.message}`);
+      }
+    }
+    
+    return false;
   }
 
   // Burst system methods (from JmrSimcFury.js)
