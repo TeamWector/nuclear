@@ -10,6 +10,7 @@ import { WoWDispelType } from "@/Enums/Auras";
 import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 import { defaultHealTargeting as heal } from "@/Targeting/HealTargeting";
 import Settings from "@/Core/Settings";
+import { PowerType } from "@/Enums/PowerType";
 
 const auras = {
   consecration: 188370,
@@ -42,7 +43,11 @@ export class PaladinProtectionBehavior extends Behavior {
           this.massInterruptRotation(),
           common.waitForTarget(),
           this.mainTankingRotation(),
-          this.damageRotation()
+          new bt.Decorator(
+            ret => combat.targets.length > 1,
+            this.multiTargetDamageRotation()
+          ),
+          this.singleTargetDamageRotation()
         )
       )
     );
@@ -97,20 +102,40 @@ export class PaladinProtectionBehavior extends Behavior {
       spell.cast("Shield of the Righteous", on => this.findShieldOfTheRighteousTarget()),
       spell.cast("Consecration", req => this.shouldCastConsecration()),
       spell.cast("Avenger's Shield", on => this.findInterruptTarget()),
-      spell.cast("Holy Bulwark", req => this.shouldCastHolyBulwark())
     );
   }
 
-  damageRotation() {
+  singleTargetDamageRotation() {
     return new bt.Selector(
       common.ensureAutoAttack(),
-      spell.cast("Hammer of Wrath", on => this.findHammerOfWrathTarget(), { skipUsableCheck: true }),
-      spell.cast("Avenger's Shield", on => this.findAvengersShieldTarget()),
-      spell.cast("Judgment", on => this.findJudgmentTargetWithoutDebuff()),
-      spell.cast("Judgment", on => this.findJudgmentTarget()),
-      spell.cast("Avenger's Shield", on => combat.bestTarget),
-      spell.cast("Blessed Hammer", req => this.findMeleeTarget()),
-      spell.cast("Consecration", req => this.findMeleeTarget())
+      spell.cast("Avenging Wrath", on => me, req => combat.bestTarget && me.isWithinMeleeRange(combat.bestTarget)),
+      spell.cast("Sacred Weapon", on => me, req => !me.hasAura(auras.avengingwrath)),
+      spell.cast("Moment of Glory", on => me),
+      spell.cast("Bastion of Light", on => me),
+      spell.cast("Hammer of Wrath"),
+      spell.cast("Judgment"),
+      spell.cast("Divine Toll", req => me.powerByType(PowerType.HolyPower) <= 4),
+      spell.cast("Holy Bulwark", req => spell.getCharges("Holy Bulwark") == 2),
+      spell.cast("Avenger's Shield"),
+      spell.cast("Holy Bulwark", req => spell.getCharges("Holy Bulwark") == 1),
+      spell.cast("Blessed Hammer"),
+      spell.cast("Word of Glory", on => me, req => me.hasAura(auras.shininglight))
+    );
+  }
+
+  multiTargetDamageRotation() {
+    return new bt.Selector(
+      common.ensureAutoAttack(),
+      spell.cast("Avenging Wrath", on => me, req => combat.bestTarget && me.isWithinMeleeRange(combat.bestTarget)),
+      spell.cast("Sacred Weapon", on => me, req => !me.hasAura(auras.avengingwrath)),
+      spell.cast("Bastion of Light", on => me),
+      spell.cast("Avenger's Shield"),
+      spell.cast("Hammer of Wrath"),
+      spell.cast("Judgment"),
+      spell.cast("Divine Toll", req => me.powerByType(PowerType.HolyPower) == 0),
+      spell.cast("Holy Bulwark"),
+      spell.cast("Blessed Hammer"),
+      spell.cast("Word of Glory", on => me, req => me.hasAura(auras.shininglight))
     );
   }
 
@@ -189,13 +214,5 @@ export class PaladinProtectionBehavior extends Behavior {
     const auraExpiring = !consecrationAura || (consecrationAura.remaining < 1500 && consecrationAura.remaining !== 0);
     const targetInRange = combat.targets.find(unit => me.isWithinMeleeRange(unit) || unit.distanceTo(me) < 14);
     return auraExpiring && targetInRange;
-  }
-
-  shouldCastHolyBulwark() {
-    return !me.hasAura(auras.holybulwark) && combat.burstToggle;
-  }
-
-  findMeleeTarget() {
-    return combat.targets.find(unit => me.isWithinMeleeRange(unit));
   }
 }

@@ -6,6 +6,8 @@ declare namespace wow {
     effectiveHealthPercent: number;
     timeToDeath(): number | undefined;
     isPlayer(): boolean;
+    getVisibleAura(identifier: string | number): AuraData | undefined;
+    getVisibleAuraByMe(identifier: string | number): AuraData | undefined;
     hasAura(identifier: string | number): boolean;
     hasAuraByMe(identifier: string | number): boolean;
     hasVisibleAura(identifier: string | number): boolean;

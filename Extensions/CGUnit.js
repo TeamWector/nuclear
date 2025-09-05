@@ -216,6 +216,24 @@ Object.defineProperties(wow.CGUnit.prototype, {
     }
   },
 
+  getVisibleAura: {
+    /**
+     * Get the aura by name or spell ID.
+     * @param {string|number} nameOrId - The name of the aura or the spell ID.
+     * @returns {wow.AuraData|null} - Returns the aura if found, or null if not found.
+     */
+    value: function (nameOrId) {
+      if (typeof nameOrId === 'number') {
+        // Get by spell ID
+        return this.visibleAuras.find(aura => aura.spellId === nameOrId) || undefined;
+      } else if (typeof nameOrId === 'string') {
+        // Get by aura name
+        return this.visibleAuras.find(aura => aura.name === nameOrId) || undefined;
+      }
+      return undefined;
+    }
+  },
+
   hasVisibleAuraByMe: {
     /**
      * Check if the unit has a visible aura by name or spell ID, cast by the player.
@@ -232,6 +250,28 @@ Object.defineProperties(wow.CGUnit.prototype, {
 
         return isMatch && visibleAura.casterGuid && me.guid && me.guid.equals(visibleAura.casterGuid);
       });
+    }
+  },
+
+  getVisibleAuraByMe: {
+    /**
+     * Get the aura by name or spell ID, cast by the player.
+     * @param {string|number} nameOrId - The name of the aura or the spell ID.
+     * @returns {wow.AuraData|undefined} - Returns the aura if found and cast by the player, or undefined if not found.
+     */
+    value: function (nameOrId) {
+      // Retrieve the aura using the getAura method
+      const aura = this.visibleAuras.find((aura) => {
+        const isMatch =
+          (typeof nameOrId === 'number' && aura.spellId === nameOrId) ||
+          (typeof nameOrId === 'string' && aura.name === nameOrId);
+
+        // Check if the aura was cast by the player
+        return isMatch && aura.casterGuid && me.guid && me.guid.equals(aura.casterGuid);
+      });
+
+      // Return the aura if found, otherwise return undefined
+      return aura || undefined;
     }
   },
 
@@ -283,7 +323,7 @@ Object.defineProperties(wow.CGUnit.prototype, {
      */
     value: function (nameOrId) {
       // Get the aura using the existing getAura method
-      const aura = this.getAuraByMe(nameOrId);
+      const aura = this.getVisibleAuraByMe(nameOrId);
 
       // If the aura is found, return the stack count, otherwise return 0
       return aura ? aura.stacks || 0 : 0;

@@ -11,7 +11,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for cast or channel");
   }
 
   static waitForTarget() {
@@ -20,7 +20,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for target");
   }
 
   static waitForNotSitting() {
@@ -29,7 +29,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for not sitting");
   }
 
   static waitForFacing() {
@@ -38,7 +38,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for facing");
   }
 
   static validTarget(u) {
@@ -55,7 +55,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for not mounted");
   }
 
   static ensureAutoAttack() {
@@ -68,7 +68,7 @@ class Common {
       }
 
       return bt.Status.Failure;
-    });
+    }, "Ensure Auto Attacking");
   }
 
   /**
@@ -207,7 +207,7 @@ class Common {
       } else {
         return bt.Status.Failure;
       }
-    });
+    }, `Use equipped item ${name}`);
   }
 
   /**
@@ -418,7 +418,7 @@ class Common {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
-    });
+    }, "Wait for not waiting for arena to start");
   }
 }
 
