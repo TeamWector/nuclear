@@ -101,14 +101,31 @@ export class HekiliBehavior extends Behavior {
       // Setup instructions
       imgui.textWrapped("Setup Instructions:");
       imgui.text("1. Install Hekili addon");
-      imgui.text("2. Install HekiliNuclearBridge addon");
-      imgui.text("3. Restart WoW or reload UI (/reload)");
+      imgui.text("2. Copy and import the WeakAura below");
+      imgui.text("3. Enable the WeakAura");
       imgui.text("4. Select this rotation profile");
       
       imgui.spacing();
-      imgui.textWrapped("Bridge addon location:");
-      imgui.text("Place the HekiliNuclearBridge folder in:");
-      imgui.textWrapped("WoW/_retail_/Interface/AddOns/");
+      imgui.textWrapped("WeakAura Import String:");
+      
+      // WeakAura import string
+      const waString = "!WA:2!1E1tVTTrw8O4IwScjajUTbBa6bcb0g7IefBdKCWO7brhjB1vwYlLuCkQlKgsoKCQPMHDMHYY5wn2TTN2d(JGU2f7b9rWFceewSFaYHEP3c6hG(MHK6F2oPffLhKiFZ7)ZV37ntUkR2Bv3vD)H1gsCy0MSyUd(JUXeuSmGXBejjmQi)iK7xhlKy39j0BYpTHNNalZncrDaMoGrOs7DkxVvzRjomwOl7eAZtir4UxK9zzxFCGPYcDptYj((yU4F)j80x))MYtJW2oGjy9ELi2g3htLnJ98idg1zNsnB1PzRswTg6ITbITaM57vU2bvAxZsZQ9EyuOmyQOhWXGOwnpOCTAMXuI0okeDkMBrr9WI8JV9G39x8IPoQOBT1ZBapOyoQdM2VyisiBh5IK4wKEyJ)21UcJBSXLf1c7W61dtb2aLVS4lTkOckjuRe9pHmhuOHtmNdbrQ53fRFl1njElS8JUwV7Zm2O4MgYamvlN6HJLXCQHhkuG1eb)4Te7ZzRzEj4duM0OnKxl55HHSi1FhwpBKCTcj55cR)B0YZf1IiCyy1NbgnlLmh96iT7SqY6rpY4aoPhIFQrpmGwD32OKJdwim2dFmjK8aHbamXCkOe(c5DHHqcXywWKWUbI6M(AXMQLVeHIlRL3gdF5MF1I5HKic4cIL3IGtLbCqLakBb)xePbTqEAbfREMLaNNVlZsAUCgtkyiGYAQLN6XwlvtRRwOqB6XuOcUWufLT3TWEiSzubfgAJCoEBJ2cSY9mCjcfEWWJRmjeit3p05FdIG(aPbQpIeISdXZdUYcMRi9fOtCv4jHrND)YcjPYNLyTumrHfYGZlJkto33Bxv8CIGa2FT1xETIMXsz2o9vq)sBWZ8sBnhBcE4vl3cIaEyk)xYBsPxSKnOe5PxfTIe3l7flIiUSexnZPyJLzx1283jkzEeY1IAEtB2)w6zanZfiFLhNPIIfnkSDb1FtJNfaPnbTOXMzIUMKziWHEg9jiJtcameM)qJEKEeNJH(AAErUUmAs)3D6StasQI)IkvvsTY(jQATc7v(VxTw1oMwvF2ULl8WmB8qJchUxvyyKfqt11u5vZAvU(mh8npjjvDZyF(uKo6Qdt)4gQQ6(q91JfbStscaqV5bnnkzeBh142r6AWyD3ElNaSZX2jFCwsU0vKp6omA64GaotkdX5Y0qaXfBjHXcUNhtthJNFeuW)16XQ9XBHONgTAc3TswVgZN4mi3pV0K3)iDGV6URlM2(91ODEzt75ohP3q73lpTAHQLRrpVHQNLH4xNNCDq(SN)0GSxvzDkKuYJXkax0D1GrCkcyFMl()CJxNng45WPaHy4hFveN5ZblNC8Zp9JUXnpxvtQpz543fo2NabQf2)cgchXZc7R272(EJV1e4t1mhFolM6(dFq0Qs8azhraco15lspNA091e1)4X49qadPVyszu85txUWhlIUZCAyhwiJ)55YLBLxLqnZPml1UvJO3xteoQmdufX5qIRmWSe85RtSfza2vt8BNKCu5Vi1JUqVU6i1eVtHaekUufzarZ6nQxE8T4qCP4zOMrhTBSc8CEAqqLr3PcN8sJ)rmYfsmiJwTwi2ZS0enTtyC3d5OOZom9LehOFYKMUxK4DDIuHw0DRwVEzRoMnA1QX(wv3DVwtMA1MKxIVFAW8IfmHAv9bZB0UvTQ1l)tt8dzNuHJ)Mym150dENnkU1tscm1cxelW7gMMHdotrsj9KKjpnG2yauBOICnm1xg8HJuVNfvN7NjQoRCH6ZNPaiaUyfnNtDoTMdGM5uaFTIwWMqDfEft1RbAc1iWI3vBntibH5b2byIFG8Bndzi3NBlbbOY7z1lousYB5aTNf3B8r5phIIoOqaG31ek(Cu0mfqos9s0DGvlLEXj4QtObbltIqdgY1OzvWp(VWhKD1kcnbGclLNNuQlEQf0YMl)elHcSh94QQYipKd(iOMUbvCKjX)qIV4O9XUe0rnvCjoQuiMllY89pZL1rlzxBpcLicU35aLKo0WDZGI8N(QPe6Oc8GX3o6PZ1(qv4bEoF(wijx1A5gjRpoSR5lzSE5E9XyCujvYrAPcNGTIjUJ(IA1R(ItA3oISz0hKDjrf(hoeN6OGUbVobKPp2Kk5y3ChRYLRpuYC6N024VM7)oOaX9IK(7MCcChZr6JA2uQkjwXcfgfa)DIUemAvi3VtQPGgrG3G7Ad3i1J4NNtOkTIdSMvRn7sVOb3CiWOlj52WNL5WDphrjjBspDSFLlWiHY2Aa77n(wJ3yIBkOupXf0VslIZu8P3W3WShIqRm(FQ5E8)A83n(7H)pEzkRkSFsXTGkOv7))EXV(";
+      
+      // Text area for the import string (read-only)
+      imgui.inputTextMultiline("##waImport", new imgui.MutableVariable(waString), { x: 280, y: 60 }, imgui.InputTextFlags.ReadOnly);
+      
+      // Copy button
+      if (imgui.button("Copy WA Import String", { x: 280, y: 25 })) {
+        imgui.setClipboardText(waString);
+        console.log("[Hekili] WeakAura import string copied to clipboard!");
+      }
+      
+      imgui.spacing();
+      imgui.textWrapped("Import Instructions:");
+      imgui.text("1. Copy the string above");
+      imgui.text("2. In WoW, type: /wa");
+      imgui.text("3. Click 'Import'");
+      imgui.text("4. Paste the string and import");
       
       imgui.end();
     }
@@ -180,10 +197,12 @@ class HekiliEventListener extends wow.EventListener {
   onEvent(event) {
     if (event.name === 'CHAT_MSG_ADDON') {
       const [prefix, message, channel, sender] = event.args;
-      console.log(`[Hekili] Received addon message: prefix=${prefix}, message=${message}`);
-      if (prefix === "HEKILI_BRIDGE") {
-        console.log(`[Hekili] Processing HEKILI_BRIDGE message: ${message}`);
-        this.handleHekiliRecommendation(message);
+      try {
+        if (prefix === "HEKILI_BRIDGE") {
+          this.handleHekiliRecommendation(message);
+        }
+      } catch (error) {
+        console.error(`[Hekili] Error processing HEKILI_BRIDGE message:`, error.message);
       }
     }
   }

@@ -15,6 +15,7 @@ const auras = {
   blackoutComboBuff: 228563,
   aspectOfHarmonyAccumulator: 443506,
   weaponsOfOrder: 310454,
+  weaponsOfOrderBuff: 387184,
   callToArmsInvokeNiuzao: 395519,
   invokeNiuzao: 132578,
   balancedStratagemMagic: 394012,
@@ -247,11 +248,20 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
         return bt.Status.Failure;
       }),
       common.waitForCastOrChannel(),
-      
+      spell.cast("Provoke",
+        on => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 30 && !unit.isTanking),
+        req => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 30 && !unit.isTanking) !== undefined),
+      spell.cast("Spinning Crane Kick",
+        on => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 10 && !unit.isTanking),
+        req => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 10 && !unit.isTanking) !== undefined),
+      spell.cast("Crackling Jade Lightning",
+        on => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 40 && unit.distanceTo(me) > 10 && !unit.isTanking),
+        req => combat.targets.find(unit => unit.inCombat() && unit.distanceTo(me) <= 40 && unit.distanceTo(me) > 10 && !unit.isTanking) !== undefined),
       // Precombat preparation
       new bt.Decorator(
         () => !me.inCombat(),
-        this.buildPrecombat()
+        this.buildPrecombat(),
+        new bt.Action(() => bt.Status.Success)
       ),
       
       // Main rotation
@@ -259,21 +269,31 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
         // Interrupts
         new bt.Decorator(
           () => Settings.UseSpearHandStrike && this.overlayToggles.interrupts.value,
-          spell.interrupt("Spear Hand Strike")
+          spell.interrupt("Spear Hand Strike"),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Defensives (only when tanking)
         new bt.Decorator(
           () => this.isTanking() && this.overlayToggles.defensives.value,
-          this.buildDefensives()
+          this.buildDefensives(),
+          new bt.Action(() => bt.Status.Success)
         ),
         
         // Racial abilities
-        this.buildRacials(),
+        new bt.Decorator(
+          () => me.inCombat(),
+          this.buildRacials(),
+          new bt.Action(() => bt.Status.Success)
+        ),
         
         // Main rotation
-        this.buildMainRotation()
-      )
+        new bt.Decorator(
+          () => me.inCombat(),
+          this.buildMainRotation(),
+          new bt.Action(() => bt.Status.Success)
+        ),
+      ),
     );
   }
 
@@ -414,6 +434,15 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
 
   buildMainRotation() {
     return new bt.Selector(
+      common.useTrinkets(() => this.getCurrentTarget(), () => me.hasVisibleAura(auras.weaponsOfOrderBuff)),
+      
+      // Immediate threat response - Provoke (taunt) high priority targets
+      spell.cast("Provoke", on => this.getHighPriorityThreatTarget(), req => 
+        Settings.UseProvoke && 
+        Settings.UseThreatGathering && 
+        this.getHighPriorityThreatTarget() !== null
+      ),
+      
       // Threat gathering with Crackling Jade Lightning (ranged enemies)
       spell.cast("Crackling Jade Lightning", on => this.getThreatTargetRanged(), req => 
         Settings.UseThreatGathering && 
@@ -664,6 +693,118 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
     return enemiesCasting.length > 1;
   }
 
+  // Get highest priority threat target for immediate taunting
+  getHighPriorityThreatTarget() {
+    const allEnemies = me.getEnemies(40);
+    
+    // Look for enemies attacking healers or low health party members first
+    const priorityTargets = [];
+    
+    for (const enemy of allEnemies) {
+      if (!common.validTarget(enemy)) continue;
+      if (me.distanceTo(enemy) > 30) continue; // Provoke range
+      
+      try {
+        // Check if enemy has threat entries
+        if (enemy.threatEntries && enemy.threatEntries.length > 0) {
+          let weHaveThreat = false;
+          let highPriorityTarget = null;
+          
+          // Check threat entries
+          for (const threatEntry of enemy.threatEntries) {
+            if (threatEntry.guid && threatEntry.guid.equals(me.guid)) {
+              weHaveThreat = true;
+              break;
+            } else if (threatEntry.guid) {
+              const threatUnit = threatEntry.guid.toUnit();
+              if (threatUnit && threatUnit.isPlayer() && !threatUnit.inCombatWith(me)) {
+                // Skip if it's another tank
+                if (this.isUnitATank(threatUnit)) continue;
+                
+                // Prioritize healers and low health players
+                const isHealer = this.isUnitAHealer(threatUnit);
+                const isLowHealth = threatUnit.pctHealth < 50;
+                
+                if (isHealer || isLowHealth) {
+                  highPriorityTarget = {
+                    enemy: enemy,
+                    threatUnit: threatUnit,
+                    priority: isHealer ? 100 : (100 - threatUnit.pctHealth)
+                  };
+                  break;
+                }
+              }
+            }
+          }
+          
+          // If others have threat but we don't, and it's a priority target
+          if (highPriorityTarget && !weHaveThreat) {
+            priorityTargets.push(highPriorityTarget);
+            if (Settings.ThreatGatheringDebug) {
+              console.log(`[Brewmaster] High priority threat target: ${enemy.unsafeName} attacking ${highPriorityTarget.threatUnit.unsafeName} (priority: ${highPriorityTarget.priority})`);
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore errors accessing threat data
+        if (Settings.ThreatGatheringDebug) {
+          console.warn(`[Brewmaster] Error checking high priority threat for ${enemy.unsafeName}: ${error.message}`);
+        }
+      }
+    }
+    
+    // Return highest priority target
+    if (priorityTargets.length > 0) {
+      priorityTargets.sort((a, b) => b.priority - a.priority);
+      return priorityTargets[0].enemy;
+    }
+    
+    return null;
+  }
+
+  // Check if a unit is a healer based on their spec or auras
+  isUnitAHealer(unit) {
+    if (!unit) return false;
+    
+    try {
+      // Check specialization if available
+      if (unit.specialization) {
+        const healerSpecs = [
+          105, // Restoration Druid
+          270, // Mistweaver Monk
+          65,  // Holy Paladin
+          256, // Discipline Priest
+          257, // Holy Priest
+          264  // Restoration Shaman
+        ];
+        
+        if (healerSpecs.includes(unit.specialization)) {
+          return true;
+        }
+      }
+      
+      // Check for healer-specific auras as backup
+      const healerAuras = [
+        "Restoration", "Holy", "Discipline", "Mistweaver", 
+        "Tree of Life", "Spirit of Redemption", "Healing Rain"
+      ];
+      
+      for (const aura of healerAuras) {
+        if (unit.hasVisibleAura(aura) || unit.hasAura(aura)) {
+          return true;
+        }
+      }
+      
+    } catch (error) {
+      // Ignore errors checking healer status
+      if (Settings.ThreatGatheringDebug) {
+        console.warn(`[Brewmaster] Error checking healer status for ${unit.unsafeName}: ${error.message}`);
+      }
+    }
+    
+    return false;
+  }
+
   getTouchOfDeathTarget() {
     if (!spell.getCooldown("Touch of Death").ready) return null;
     
@@ -695,23 +836,115 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
   
   // Get ranged enemy that needs threat (for Crackling Jade Lightning)
   getThreatTargetRanged() {
-    const enemies = combat.targets.filter(target => 
-      common.validTarget(target) && 
-      me.distanceTo(target) > 10 && 
-      me.distanceTo(target) <= 40 && 
-      me.isFacing(target)
-    );
+    const allEnemies = me.getEnemies(40);
+    
+    if (Settings.ThreatGatheringDebug) {
+      console.log(`[Brewmaster] Checking ranged threat targets - total enemies in 40y: ${allEnemies.length}`);
+    }
+    
+    const enemies = allEnemies.filter(target => {
+      if (!common.validTarget(target)) return false;
+      if (me.distanceTo(target) <= 10 || me.distanceTo(target) > 40) return false;
+      
+      // Only consider enemies that are in combat with me or party members
+      let inCombatWithGroup = false;
+      
+      if (target.inCombatWith(me)) {
+        inCombatWithGroup = true;
+      } else {
+        // Check if any party member is in combat with this enemy
+        const friends = me.getFriends(40);
+        for (const friend of friends) {
+          if (target.inCombatWith(friend)) {
+            if (Settings.ThreatGatheringDebug) {
+              console.log(`[Brewmaster] ${target.unsafeName} is in combat with party member ${friend.unsafeName}`);
+            }
+            inCombatWithGroup = true;
+            break;
+          }
+        }
+      }
+      
+      if (!inCombatWithGroup) return false;
+      
+      // For threat gathering, we need to be able to face the target to cast on it
+      // But we'll be more lenient - if we can't face it now, we might be able to after turning
+      if (!me.isFacing(target)) {
+        // Check if the target is in a reasonable arc that we could face
+        const angle = me.angleTo(target);
+        if (Math.abs(angle) > Math.PI) {
+          if (Settings.ThreatGatheringDebug) {
+            console.log(`[Brewmaster] ${target.unsafeName} is behind us (angle: ${(angle * 180 / Math.PI).toFixed(1)}°), skipping`);
+          }
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    if (Settings.ThreatGatheringDebug) {
+      console.log(`[Brewmaster] Ranged enemies (>10y, <=40y, faceable): ${enemies.length}`);
+      enemies.forEach(enemy => {
+        const angle = me.angleTo(enemy);
+        console.log(`[Brewmaster] - ${enemy.unsafeName}: distance=${me.distanceTo(enemy).toFixed(1)}y, facing=${me.isFacing(enemy)}, angle=${(angle * 180 / Math.PI).toFixed(1)}°`);
+      });
+    }
     
     return this.findEnemyWithoutOurThreat(enemies);
   }
   
   // Get melee enemy that needs threat (for Spinning Crane Kick)
   getThreatTargetMelee() {
-    const enemies = combat.targets.filter(target => 
-      common.validTarget(target) && 
-      me.distanceTo(target) <= 10 && 
-      me.isFacing(target)
-    );
+    const allEnemies = me.getEnemies(40);
+    
+    const enemies = allEnemies.filter(target => {
+      if (!common.validTarget(target)) return false;
+      if (me.distanceTo(target) > 10) return false;
+      
+      // Only consider enemies that are in combat with me or party members
+      let inCombatWithGroup = false;
+      
+      if (target.inCombatWith(me)) {
+        inCombatWithGroup = true;
+      } else {
+        // Check if any party member is in combat with this enemy
+        const friends = me.getFriends(40);
+        for (const friend of friends) {
+          if (target.inCombatWith(friend)) {
+            if (Settings.ThreatGatheringDebug) {
+              console.log(`[Brewmaster] ${target.unsafeName} is in combat with party member ${friend.unsafeName}`);
+            }
+            inCombatWithGroup = true;
+            break;
+          }
+        }
+      }
+      
+      if (!inCombatWithGroup) return false;
+      
+      // For melee threat gathering, facing is less critical since Spinning Crane Kick is AoE
+      // But we still want to avoid targets completely behind us
+      if (!me.isFacing(target)) {
+        const angle = me.angleTo(target);
+        if (Math.abs(angle) > Math.PI * 0.75) { // Allow wider arc for melee AoE
+          if (Settings.ThreatGatheringDebug) {
+            console.log(`[Brewmaster] ${target.unsafeName} is too far behind us (angle: ${(angle * 180 / Math.PI).toFixed(1)}°), skipping`);
+          }
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    if (Settings.ThreatGatheringDebug) {
+      console.log(`[Brewmaster] Melee enemies (<=10y, faceable): ${enemies.length}`);
+      enemies.forEach(enemy => {
+        const angle = me.angleTo(enemy);
+        console.log(`[Brewmaster] - ${enemy.unsafeName}: distance=${me.distanceTo(enemy).toFixed(1)}y, facing=${me.isFacing(enemy)}, angle=${(angle * 180 / Math.PI).toFixed(1)}°`);
+      });
+    }
     
     return this.findEnemyWithoutOurThreat(enemies);
   }
@@ -734,15 +967,33 @@ export class JmrSimcBrewmasterBehavior extends Behavior {
             } else if (threatEntry.guid) {
               // Check if it's a party/raid member with threat
               const threatUnit = threatEntry.guid.toUnit();
-              if (threatUnit && threatUnit.isPlayer() && !threatUnit.inCombatWith(me)) {
-                // Check if this unit is a tank - if so, don't steal threat from them
-                if (this.isUnitATank(threatUnit)) {
-                  if (Settings.ThreatGatheringDebug) {
-                    console.log(`[Brewmaster] Skipping ${enemy.unsafeName} - tank ${threatUnit.unsafeName} has threat`);
-                  }
-                  return null; // Don't steal from other tanks
+              if (threatUnit && threatUnit.isPlayer()) {
+                // Debug: Show all threat holders
+                if (Settings.ThreatGatheringDebug) {
+                  console.log(`[Brewmaster] Player ${threatUnit.unsafeName} has threat on ${enemy.unsafeName}, inCombatWith(me): ${threatUnit.inCombatWith(me)}`);
                 }
-                othersHaveThreat = true;
+                
+                if (!threatUnit.inCombatWith(me)) {
+                  // Check if this unit is a tank - if so, don't steal threat from them
+                  if (this.isUnitATank(threatUnit)) {
+                    if (Settings.ThreatGatheringDebug) {
+                      console.log(`[Brewmaster] Skipping ${enemy.unsafeName} - tank ${threatUnit.unsafeName} has threat`);
+                    }
+                    return null; // Don't steal from other tanks
+                  }
+                  othersHaveThreat = true;
+                  if (Settings.ThreatGatheringDebug) {
+                    console.log(`[Brewmaster] Valid threat target: ${threatUnit.unsafeName} (non-tank) has threat on ${enemy.unsafeName}`);
+                  }
+                } else {
+                  if (Settings.ThreatGatheringDebug) {
+                    console.log(`[Brewmaster] Skipping ${threatUnit.unsafeName} - in combat with me`);
+                  }
+                }
+              } else {
+                if (Settings.ThreatGatheringDebug) {
+                  console.log(`[Brewmaster] Threat unit is null or not a player: ${threatUnit?.unsafeName || 'null'}`);
+                }
               }
             }
           }
