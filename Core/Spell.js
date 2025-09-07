@@ -399,9 +399,10 @@ class Spell extends wow.EventListener {
    *
    * @param {number | string} spellNameOrId - The ID or name of the interrupt spell to cast.
    * @param {boolean} [interruptPlayersOnly=false] - If set to true, only player units will be interrupted.
+   * @param {number} [customRange=null] - Optional custom range override. If provided, uses this instead of spell.baseMaxRange.
    * @returns {bt.Sequence} - A behavior tree sequence that handles the interrupt logic.
    */
-  interrupt(spellNameOrId, interruptPlayersOnly = false) {
+  interrupt(spellNameOrId, interruptPlayersOnly = false, customRange = null) {
     return new bt.Sequence(`Interrupt using ${spellNameOrId.toString()}`,
       new bt.Action(() => {
         // Early return if interrupt mode is set to "None"
@@ -414,7 +415,7 @@ class Spell extends wow.EventListener {
           return bt.Status.Failure;
         }
 
-        const spellRange = spell.baseMaxRange;
+        const spellRange = customRange !== null ? customRange : spell.baseMaxRange;
         const unitsAround = combat.targets;
         for (const target of unitsAround) {
           if (!(target instanceof wow.CGUnit)) {
@@ -426,8 +427,15 @@ class Spell extends wow.EventListener {
           if (interruptPlayersOnly && !target.isPlayer()) {
             continue;
           }
-          if (!spell.inRange(target) && !me.isWithinMeleeRange(target)) {
-            continue;
+          // Use custom range if provided, otherwise use spell's range check
+          if (customRange !== null) {
+            if (me.distanceTo(target) > customRange) {
+              continue;
+            }
+          } else {
+            if (!spell.inRange(target) && !me.isWithinMeleeRange(target)) {
+              continue;
+            }
           }
           const castInfo = target.spellInfo;
           if (!castInfo) {

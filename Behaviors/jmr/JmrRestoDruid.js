@@ -204,7 +204,9 @@ export class JmrRestoDruidBehavior extends Behavior {
         { type: "checkbox", uid: "MaintainMoonfire", text: "Maintain Moonfire", default: true },
         { type: "slider", uid: "MoonfireMinTTD", text: "Moonfire Min Time to Death (seconds)", min: 5, max: 60, default: 15 },
         { type: "checkbox", uid: "UseCatWeaving", text: "Use Cat Weaving", default: true },
+        { type: "checkbox", uid: "RespectRakeTTD", text: "Respect Rake Time to Death", default: true },
         { type: "slider", uid: "RakeMinTTD", text: "Rake Min Time to Death (seconds)", min: 3, max: 30, default: 6 },
+        { type: "checkbox", uid: "RespectRipTTD", text: "Respect Rip Time to Death", default: true },
         { type: "slider", uid: "RipMinTTD", text: "Rip Min Time to Death (seconds)", min: 5, max: 60, default: 12 },
         { type: "slider", uid: "CatWeavingHealthPct", text: "Cat Weaving Health Threshold %", min: 0, max: 100, default: 68 },
         { type: "slider", uid: "CatFormEnergyThreshold", text: "Cat Form Exit Energy Threshold", min: 0, max: 100, default: 8 },
@@ -241,7 +243,7 @@ export class JmrRestoDruidBehavior extends Behavior {
   ];
 
   build() {
-    return new bt.Selector(
+    return new bt.Selector("JmrRestoDruid",
       new bt.Action(() => {
         this.renderOverlay();
         
@@ -302,11 +304,13 @@ export class JmrRestoDruidBehavior extends Behavior {
       new bt.Decorator(
         () => me.inCombat() && me.target && me.canAttack(me.target) && !me.target.isImmune() && 
               me.distanceTo(me.target) > 8 && 
+              !me.hasVisibleAura(432031) &&
               (me.hasVisibleAura(auras.catForm) || me.hasVisibleAura(auras.bearForm)),
         new bt.Action(() => {
           me.cancelAura();
           return bt.Status.Success;
-        })
+        }),
+        "Cancel Forms"
       ),
 
       new bt.Decorator(
@@ -317,7 +321,8 @@ export class JmrRestoDruidBehavior extends Behavior {
             return spell.castPrimitive(prowlSpell, me) ? bt.Status.Success : bt.Status.Failure;
           }
           return bt.Status.Failure;
-        })
+        }),
+        "Prowl"
       ),
       common.waitForNotMounted(),
       common.waitForNotSitting(),
@@ -340,13 +345,14 @@ export class JmrRestoDruidBehavior extends Behavior {
                 }
             }
             return bt.Status.Failure;
-        })
+        }),
+        "Rebirth Mouseover"
       ),
 
 
       common.waitForCastOrChannel(),
               // Main rotation
-        new bt.Selector(
+        new bt.Selector("Main Rotation",
           // Revitalize (mass resurrection) - out of combat only
           spell.cast("Revitalize", () => 
             Settings.UseRevitalize &&
@@ -360,7 +366,9 @@ export class JmrRestoDruidBehavior extends Behavior {
             this.getSymbioticRelationshipTarget() !== null &&
             !me.hasVisibleAura(474754) &&
             me.getFriends(40).length > 2 &&
-            !spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Symbiotic Relationship")
+            !spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Symbiotic Relationship") &&
+            !this.getSymbioticRelationshipTarget().inCombat() &&
+            !me.inCombat()
           ),
           
           // Mark of the Wild maintenance (high priority utility)
@@ -373,37 +381,43 @@ export class JmrRestoDruidBehavior extends Behavior {
           // Emergency healing (highest priority)
           new bt.Decorator(
             () => this.overlayToggles.healing.value,
-            this.buildEmergencyHealing()
+            this.buildEmergencyHealing(),
+            "Emergency Healing"
           ),
         
         // Ramp mode rotation
         new bt.Decorator(
           () => this.rampModeActive,
-          this.buildRampRotation()
+          this.buildRampRotation(),
+          "Ramp Mode"
         ),
         
         // Interrupts and dispels
         new bt.Decorator(
           () => this.overlayToggles.interrupts.value,
-          this.buildInterrupts()
+          this.buildInterrupts(),
+          "Interrupts"
         ),
         
         // Cooldowns
         new bt.Decorator(
           () => this.overlayToggles.cooldowns.value,
-          this.buildCooldowns()
+          this.buildCooldowns(),
+          "Cooldowns"
         ),
         
         // Normal healing rotation
         new bt.Decorator(
           () => this.overlayToggles.healing.value,
-          this.buildHealingRotation()
+          this.buildHealingRotation(),
+          "Healing"
         ),
         
         // DPS rotation
         new bt.Decorator(
           () => this.overlayToggles.dps.value && Settings.EnableDPS,
-          this.buildDPSRotation()
+          this.buildDPSRotation(),
+          "DPS"
         )
       )
     );
@@ -420,13 +434,13 @@ export class JmrRestoDruidBehavior extends Behavior {
       // Renewal for self emergency
       spell.cast("Renewal", () => 
         Settings.UseRenewal &&
-        me.pctHealth <= Settings.RenewalHealthPct
+        me.effectiveHealthPercent <= Settings.RenewalHealthPct
       ),
       
       // Barkskin for self damage reduction
       spell.cast("Barkskin", () => 
         Settings.UseBarkskin &&
-        me.pctHealth <= Settings.BarkskinHealthPct &&
+        me.effectiveHealthPercent <= Settings.BarkskinHealthPct &&
         !me.hasVisibleAura(auras.barkskin) &&
         !me.hasVisibleAura(102342) &&
         me.inCombat()
@@ -453,30 +467,34 @@ export class JmrRestoDruidBehavior extends Behavior {
       // Swiftmend for emergency healing
       spell.cast("Swiftmend", on => this.getSwiftmendTarget(), req => 
         this.getSwiftmendTarget() !== null
-      )
+      ),
+
+      this.buildHealingRotation()
     );
   }
 
   buildRampRotation() {
     return new bt.Selector(
-      // Cancel any form when ramp is active
-      new bt.Action(() => {
-        if (me.hasVisibleAura(auras.catForm)) {
-          const catFormAura = me.getAura(auras.catForm);
-          if (catFormAura) {
-            me.cancelAura(catFormAura.spellId);
-          }
-          return bt.Status.Success;
-        }
-        if (me.hasVisibleAura(auras.bearForm)) {
-          const bearFormAura = me.getAura(auras.bearForm);
-          if (bearFormAura) {
-            me.cancelAura(bearFormAura.spellId);
-          }
-          return bt.Status.Success;
-        }
-        return bt.Status.Failure;
-      }),
+       // Cancel any form when ramp is active (unless form-locked)
+       new bt.Action(() => {
+         if (!me.hasVisibleAura(432031)) {
+           if (me.hasVisibleAura(auras.catForm)) {
+             const catFormAura = me.getAura(auras.catForm);
+             if (catFormAura) {
+               me.cancelAura(catFormAura.spellId);
+             }
+             return bt.Status.Success;
+           }
+           if (me.hasVisibleAura(auras.bearForm)) {
+             const bearFormAura = me.getAura(auras.bearForm);
+             if (bearFormAura) {
+               me.cancelAura(bearFormAura.spellId);
+             }
+             return bt.Status.Success;
+           }
+         }
+         return bt.Status.Failure;
+       }),
       
       // Check for emergency exit conditions
       new bt.Action(() => {
@@ -546,72 +564,86 @@ export class JmrRestoDruidBehavior extends Behavior {
   buildInterrupts() {
     return new bt.Selector(
       // AoE interrupt for multiple casters (3+ enemies casting within 10y)
-      new bt.Decorator(
-        () => Settings.UseIncapacitatingRoar &&
-             !spell.getCooldown("Skull Bash").ready &&
-             this.getCastingEnemiesInRange(10) >= 3,
-        new bt.Selector(
-          // Cast Incapacitating Roar if ready
-          new bt.Decorator(
-            () => spell.getCooldown("Incapacitating Roar").ready,
-            spell.cast("Incapacitating Roar")
-          ),
+    //   new bt.Decorator(
+    //     () => Settings.UseIncapacitatingRoar &&
+    //          !spell.getCooldown("Skull Bash").ready &&
+    //          this.getCastingEnemiesInRange(10) >= 3,
+    //     new bt.Selector(
+    //       // Cast Incapacitating Roar if ready
+    //       new bt.Decorator(
+    //         () => spell.getCooldown("Incapacitating Roar").ready,
+    //         spell.cast("Incapacitating Roar"),
+    //         new bt.Action(() => bt.Status.Success)
+    //       ),
           
-          // Handle form switching after Incapacitating Roar
-          new bt.Decorator(
-            () => spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Incapacitating Roar") !== undefined,
-            new bt.Action(() => {
-              me.forceUpdateAuras();
-              let aura = me.hasVisibleAura("Bear Form") ? me.getAura("Bear Form") : null;
-              if (aura) {
-                me.cancelAura(aura.spellId);
-              }
-              return bt.Status.Success;
-            })
-          ),
+    //       // Handle form switching after Incapacitating Roar
+    //       new bt.Decorator(
+    //         () => spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Incapacitating Roar") !== undefined,
+    //         new bt.Action(() => {
+    //           me.forceUpdateAuras();
+    //           let aura = me.hasVisibleAura("Bear Form") ? me.getAura("Bear Form") : null;
+    //           if (aura) {
+    //             me.cancelAura(aura.spellId);
+    //           }
+    //           return bt.Status.Success;
+    //         })
+    //       ),
           
-          new bt.Action(() => bt.Status.Success)
-        )
-      ),
+    //       new bt.Action(() => bt.Status.Success)
+    //     )
+    //   ),
       
-      // Single target interrupt fallback when Skull Bash not ready
-      new bt.Decorator(
-        () => Settings.UseMightyBash &&
-             !spell.getCooldown("Skull Bash").ready &&
-             this.getInterruptTarget() !== null,
-        spell.interrupt("Mighty Bash")
-      ),
+    //   // Single target interrupt fallback when Skull Bash not ready
+    //   new bt.Decorator(
+    //     () => Settings.UseMightyBash &&
+    //          !spell.getCooldown("Skull Bash").ready &&
+    //          this.getCastingEnemiesInRange(10) >= 1,
+    //     spell.interrupt("Mighty Bash"),
+    //     new bt.Action(() => bt.Status.Success)
+    //   ),
       
-      // Skull Bash interrupt with form management (your proper implementation)
-      new bt.Decorator(
-        () => me.target !== null && this.getInterruptTarget() !== null,
-        new bt.Selector(
-          // Cast Skull Bash if ready
-          new bt.Decorator(
-            () => spell.getCooldown("Skull Bash").ready,
-            spell.interrupt("Skull Bash")
-          ),
+      // Skull Bash interrupt with form management
+    //   new bt.Decorator(
+    //     () => true,
+    //     new bt.Selector(
+    //       // Cast Skull Bash if ready
+    //       new bt.Decorator(
+    //         () => spell.getCooldown("Skull Bash").ready,
+    //         spell.interrupt("Skull Bash"),
+    //         new bt.Action(() => bt.Status.Success)
+    //       ),
           
-          // Handle form switching after Skull Bash (your implementation)
-          new bt.Decorator(
-            () => spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Skull Bash") !== undefined,
-            new bt.Action(() => {
-              me.forceUpdateAuras();
-              let aura = me.hasVisibleAura("Bear Form") ? me.getAura("Bear Form") : 
-                         me.hasVisibleAura("Cat Form") ? me.getAura("Cat Form") : null;
-              if (aura) {
-                me.cancelAura(aura.spellId);
-              }
-              return bt.Status.Success;
-            })
-          ),
+    //       // Handle form switching after Skull Bash
+    //       new bt.Decorator(
+    //         () => spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Skull Bash") !== undefined,
+    //         new bt.Action(() => {
+    //           let aura = me.hasVisibleAura("Bear Form") ? me.getAura("Bear Form") : 
+    //                      me.hasVisibleAura("Cat Form") ? me.getAura("Cat Form") : null;
+    //           if (aura) {
+    //             me.cancelAura(aura.spellId);
+    //           }
+    //           return bt.Status.Success;
+    //         })
+    //       ),
           
-          new bt.Action(() => bt.Status.Success)
-        )
-      ),
-      
-      // Nature's Cure for dispels
+    //       new bt.Action(() => bt.Status.Success)
+    //     )
+    //   ),
+     // Incapacitating Roar for AoE interrupt (3+ enemies casting within 10y)
+     new bt.Decorator(
+       () => Settings.UseIncapacitatingRoar &&
+             this.getCastingEnemiesInRange(10) >= 3 &&
+             this.shouldInterruptNow(),
+       spell.interrupt("Incapacitating Roar", false, 10)
+     ),
+
+     spell.interrupt("Skull Bash"),
+       
+       // Nature's Cure for dispels
       spell.dispel("Nature's Cure", true, DispelPriority.Low, true, WoWDispelType.Magic, WoWDispelType.Curse, WoWDispelType.Poison),
+      spell.cast("Nature's Cure", on => this.findFriendWithMythicDebuff(), req => 
+        this.findFriendWithMythicDebuff() !== null
+      ),
       spell.dispel("Soothe", false, DispelPriority.Low, false, WoWDispelType.Enrage)
     );
   }
@@ -730,8 +762,8 @@ export class JmrRestoDruidBehavior extends Behavior {
             me.stopCasting();
           }
           
-          // Cancel cat form for emergency healing
-          if (me.hasVisibleAura(auras.catForm)) {
+          // Cancel cat form for emergency healing (unless form-locked)
+          if (me.hasVisibleAura(auras.catForm) && !me.hasVisibleAura(432031)) {
             const catFormAura = me.getAura(auras.catForm);
             if (catFormAura) {
               me.cancelAura(catFormAura.spellId);
@@ -766,7 +798,7 @@ export class JmrRestoDruidBehavior extends Behavior {
               // Cat rotation if we have Rake talent (cat weaving enabled)
         new bt.Decorator(
           () => Settings.UseCatWeaving && this.getEnemiesInRange(6) >= 1 &&
-               this.getLowestHealthAlly()?.pctHealth >= Settings.CatWeavingHealthPct &&
+               this.getLowestHealthAlly()?.effectiveHealthPercent >= Settings.CatWeavingHealthPct &&
                this.canEnterCatFormAfterEmergency() &&
                this.isTargetEngagedByGroup(),
           this.buildCatDPSRotation()
@@ -823,8 +855,8 @@ export class JmrRestoDruidBehavior extends Behavior {
           const currentEnergy = me.powerByType(PowerType.Energy);
           const energyThreshold = Settings.CatFormEnergyThreshold;
           
-          // Exit if energy is below threshold (but respect minimum duration)
-          if (currentEnergy < energyThreshold && this.canExitCatForm()) {
+          // Exit if energy is below threshold (but respect minimum duration and form-lock)
+          if (currentEnergy < energyThreshold && this.canExitCatForm() && !me.hasVisibleAura(432031)) {
             const catFormAura = me.getAura(auras.catForm);
             if (catFormAura) {
               me.cancelAura(catFormAura.spellId);
@@ -833,10 +865,10 @@ export class JmrRestoDruidBehavior extends Behavior {
             return bt.Status.Success;
           }
           
-          // Also exit if we need to heal someone (but respect minimum duration unless emergency)
+          // Also exit if we need to heal someone (but respect minimum duration unless emergency and not form-locked)
           const friendsNeedingHealing = this.getFriendsUnderHealthPercent(Settings.RegrowthHealthPct);
           const isEmergency = this.isEmergencyHealing();
-          if (friendsNeedingHealing.length > 0 && (isEmergency || this.canExitCatForm())) {
+          if (friendsNeedingHealing.length > 0 && (isEmergency || this.canExitCatForm()) && !me.hasVisibleAura(432031)) {
             const catFormAura = me.getAura(auras.catForm);
             if (catFormAura) {
               me.cancelAura(catFormAura.spellId);
@@ -865,18 +897,19 @@ export class JmrRestoDruidBehavior extends Behavior {
         this.shouldUseBurstAbility()
       ),
       
-      // Fluid Form optimization: Use Rake for Convoke setup if Rake would be next
-      new bt.Decorator(
-        () => Settings.UseConvokeForDPS &&
-              this.getEnemiesInRange(40) <= 6 &&
-              !me.hasVisibleAura(auras.catForm) &&
-              spell.getCooldown("Convoke the Spirits").timeleft <= 1500 &&
-              (me.hasVisibleAura(auras.heartOfTheWild) || 
-               spell.getCooldown("Heart of the Wild").timeleft > 30000 || 
-               !Settings.UseHeartOfTheWild) &&
-              this.hasTalent("Fluid Form") &&
-              spell.getCooldown(1822).ready &&
-              this.shouldCastRakeNext(),
+       // Fluid Form optimization: Use Rake for Convoke setup if Rake would be next
+       new bt.Decorator(
+         () => Settings.UseConvokeForDPS &&
+               this.getEnemiesInRange(40) <= 6 &&
+               !me.hasVisibleAura(auras.catForm) &&
+               !me.hasVisibleAura(432031) &&
+               spell.getCooldown("Convoke the Spirits").timeleft <= 1500 &&
+               (me.hasVisibleAura(auras.heartOfTheWild) || 
+                spell.getCooldown("Heart of the Wild").timeleft > 30000 || 
+                !Settings.UseHeartOfTheWild) &&
+               this.hasTalent("Fluid Form") &&
+               spell.getCooldown(1822).ready &&
+               this.shouldCastRakeNext(),
         new bt.Action(() => {
           const target = this.getRakeTarget();
           if (target && me.distanceTo(target) <= 8) {
@@ -1016,14 +1049,16 @@ export class JmrRestoDruidBehavior extends Behavior {
           const hasFluidForm = this.hasTalent("Fluid Form");
           const shouldRake = this.shouldCastRakeNext();
           const notInCat = !me.hasVisibleAura(auras.catForm);
+          const notFormLocked = !me.hasVisibleAura(432031);
           const hasEnergy = me.powerByType(PowerType.Energy) > 60;
           const rakeReady = spell.getCooldown(1822).ready;
+          const hasAttackableTargets = this.getAttackableEnemiesInRange(8) > 0;
           
           if (Settings.CatWeavingDebug && notInCat && hasEnergy) {
-            console.info(`[RestoDruid] Fluid Form Rake check - FluidForm: ${hasFluidForm}, ShouldRake: ${shouldRake}, RakeReady: ${rakeReady}`);
+            console.info(`[RestoDruid] Fluid Form Rake check - FluidForm: ${hasFluidForm}, ShouldRake: ${shouldRake}, RakeReady: ${rakeReady}, FormLocked: ${!notFormLocked}, AttackableTargets: ${hasAttackableTargets}`);
           }
           
-          return notInCat && hasEnergy && hasFluidForm && rakeReady && shouldRake;
+          return notInCat && notFormLocked && hasEnergy && hasFluidForm && rakeReady && shouldRake && hasAttackableTargets;
         },
         new bt.Sequence(
           spell.cast("Rake", on => this.getRakeTarget(), req => 
@@ -1047,6 +1082,7 @@ export class JmrRestoDruidBehavior extends Behavior {
           !me.hasVisibleAura(auras.catForm) &&
           me.powerByType(PowerType.Energy) >= Settings.CatFormEntryEnergyThreshold &&
           this.canShiftForms() &&
+          this.getAttackableEnemiesInRange(8) > 0 &&
           (!this.hasTalent("Fluid Form") || !this.shouldCastRakeNext() || !this.isRakeTargetInMelee())
         ),
         new bt.Action(() => {
@@ -1081,9 +1117,11 @@ export class JmrRestoDruidBehavior extends Behavior {
       // Fluid Form optimization: Use Shred to enter Cat Form if Shred would be our next cast
       new bt.Decorator(
         () => !me.hasVisibleAura(auras.catForm) && 
+              !me.hasVisibleAura(432031) &&
               me.powerByType(PowerType.Energy) > 50 && 
               this.hasTalent("Fluid Form") && 
               spell.getCooldown(5221).ready &&
+              this.getAttackableEnemiesInRange(8) > 0 &&
               this.shouldCastShredNext(),
         new bt.Sequence(
           spell.cast("Shred", on => this.getCurrentTarget(), req => 
@@ -1105,6 +1143,7 @@ export class JmrRestoDruidBehavior extends Behavior {
           !me.hasVisibleAura(auras.catForm) &&
           me.powerByType(PowerType.Energy) >= Settings.CatFormEntryEnergyThreshold &&
           this.canShiftForms() &&
+          this.getAttackableEnemiesInRange(8) > 0 &&
           (!this.hasTalent("Fluid Form") || !this.shouldCastShredNext() || !this.isCurrentTargetInMelee())
         ),
         new bt.Action(() => {
@@ -1194,8 +1233,10 @@ export class JmrRestoDruidBehavior extends Behavior {
       // Fluid Form optimization: Use Rake as fallback to enter Cat Form if Rake would be next
       new bt.Decorator(
         () => !me.hasVisibleAura(auras.catForm) && 
+              !me.hasVisibleAura(432031) &&
               this.hasTalent("Fluid Form") && 
               spell.getCooldown(1822).ready &&
+              this.getAttackableEnemiesInRange(8) > 0 &&
               this.shouldCastRakeNext(),
         new bt.Action(() => {
           const target = this.getRakeTarget();
@@ -1218,6 +1259,7 @@ export class JmrRestoDruidBehavior extends Behavior {
           !me.hasVisibleAura(auras.catForm) &&
           me.powerByType(PowerType.Energy) >= Settings.CatFormEntryEnergyThreshold &&
           this.canShiftForms() &&
+          this.getAttackableEnemiesInRange(8) > 0 &&
           (!this.hasTalent("Fluid Form") || !this.shouldCastRakeNext() || !this.isRakeTargetInMelee())
         ),
         new bt.Action(() => {
@@ -1280,12 +1322,40 @@ export class JmrRestoDruidBehavior extends Behavior {
         !me.hasVisibleAura(auras.catForm) &&
         (this.getEnemiesInRange(40) > 1 || me.hasVisibleAura(auras.heartOfTheWild))
       ),
+
+      new bt.Sequence(
+        spell.cast("Cat Form", () => 
+          !me.hasVisibleAura(auras.catForm) &&
+          me.powerByType(PowerType.Energy) >= Settings.CatFormEntryEnergyThreshold &&
+          this.canShiftForms() &&
+          this.getAttackableEnemiesInRange(8) > 0 &&
+          (!this.hasTalent("Fluid Form") || !this.shouldCastRakeNext() || !this.isRakeTargetInMelee())
+        ),
+        new bt.Action(() => {
+          this.trackFormShift();
+          this.trackCatFormEntry();
+          return bt.Status.Success;
+        })
+      ),
+      
+      // Basic Shred fallback (should always work in cat form with energy)
+      new bt.Sequence(
+        spell.cast("Shred", on => this.getCurrentTarget(), req => 
+          this.getCurrentTarget() !== null &&
+          me.hasVisibleAura(auras.catForm) &&
+          me.powerByType(PowerType.Energy) >= 40
+        ),
+        new bt.Action(() => {
+          this.trackComboGenerator("Shred");
+          return bt.Status.Success;
+        })
+      ),
       
       // Wrath filler
       spell.cast("Wrath", on => this.getCurrentTarget(), req => 
         this.getCurrentTarget() !== null && 
         !me.hasVisibleAura(auras.catForm) &&
-        (!this.hasTalent("Rip") || me.distanceTo(this.getCurrentTarget()) > 8)
+        (this.hasTalent("Starfire") || this.getAttackableEnemiesInRange(8) === 0)
       )
     );
   }
@@ -1340,7 +1410,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend && 
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40
-    ).sort((a, b) => a.pctHealth - b.pctHealth)[0] || null;
+    ).sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent)[0] || null;
   }
 
   getCriticalHealthAlly() {
@@ -1348,7 +1418,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend && 
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
-      friend.pctHealth <= Settings.NatureSwiftnessHealthPct
+      friend.effectiveHealthPercent <= Settings.NatureSwiftnessHealthPct
     ) || null;
   }
 
@@ -1358,7 +1428,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
       me.isFacing(friend) &&
-      friend.pctHealth <= Settings.RegrowthHealthPct
+      friend.effectiveHealthPercent <= Settings.RegrowthHealthPct
     ) || null;
   }
 
@@ -1367,7 +1437,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend && 
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
-      friend.pctHealth <= Settings.RejuvenationHealthPct &&
+      friend.effectiveHealthPercent <= Settings.RejuvenationHealthPct &&
       !friend.hasAura(auras.rejuvenation)
     ) || null;
   }
@@ -1503,7 +1573,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       });
       
       // Only return expiring Lifebloom if the target also needs healing
-      if (expiringLifebloom && expiringLifebloom.pctHealth <= Settings.LifebloomHealingHealthPct) {
+      if (expiringLifebloom && expiringLifebloom.effectiveHealthPercent <= Settings.LifebloomHealingHealthPct) {
         return expiringLifebloom;
       }
       
@@ -1515,10 +1585,10 @@ export class JmrRestoDruidBehavior extends Behavior {
       .filter(friend => 
         friend && !friend.deadOrGhost && 
         me.distanceTo(friend) <= 40 &&
-        friend.pctHealth <= Settings.LifebloomHealingHealthPct &&
+        friend.effectiveHealthPercent <= Settings.LifebloomHealingHealthPct &&
         !friend.hasVisibleAura(auras.lifebloomResto) // Don't overwrite existing Lifebloom
       )
-      .sort((a, b) => a.pctHealth - b.pctHealth)[0];
+      .sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent)[0];
     
     return target || null;
   }
@@ -1528,7 +1598,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend && 
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
-      friend.pctHealth <= Settings.SwiftmendHealthPct &&
+      friend.effectiveHealthPercent <= Settings.SwiftmendHealthPct &&
       (friend.hasAura(auras.rejuvenation) || friend.hasAura(auras.regrowth) || friend.hasAura(auras.wildGrowth))
     ) || null;
   }
@@ -1549,7 +1619,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
       !friend.hasAura(auras.cenarionWard) &&
-      friend.pctHealth <= 80
+      friend.effectiveHealthPercent <= 80
     ) || null;
   }
 
@@ -1559,9 +1629,9 @@ export class JmrRestoDruidBehavior extends Behavior {
       .filter(friend => 
         friend && !friend.deadOrGhost && 
         me.distanceTo(friend) <= 40 &&
-        friend.pctHealth <= Settings.GroveGuardiansHealthPct
+        friend.effectiveHealthPercent <= Settings.GroveGuardiansHealthPct
       )
-      .sort((a, b) => a.pctHealth - b.pctHealth)[0] || null;
+      .sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent)[0] || null;
   }
 
   getIronbarkTarget() {
@@ -1571,7 +1641,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       me.distanceTo(friend) <= 40 &&
       (friend.guid !== me.guid || (!me.hasVisibleAura(auras.barkskin))) &&
       friend.inCombat() &&
-      friend.pctHealth <= Settings.IronbarkHealthPct
+      friend.effectiveHealthPercent <= Settings.IronbarkHealthPct
     ) || null;
   }
 
@@ -1579,9 +1649,7 @@ export class JmrRestoDruidBehavior extends Behavior {
     return combat.targets.find(enemy => 
       !enemy.deadOrGhost && 
       me.distanceTo(enemy) <= 30 &&
-      enemy.isCastingOrChanneling &&
-      enemy.spellInfo &&
-      enemy.spellInfo.interruptible
+      enemy.isCastingOrChanneling
     ) || null;
   }
 
@@ -1589,10 +1657,45 @@ export class JmrRestoDruidBehavior extends Behavior {
     return combat.targets.filter(enemy => 
       !enemy.deadOrGhost && 
       me.distanceTo(enemy) <= range &&
-      enemy.isCastingOrChanneling &&
-      enemy.spellInfo &&
-      enemy.spellInfo.interruptible
+      enemy.isCastingOrChanneling
     ).length;
+  }
+
+  shouldInterruptNow() {
+    // Check if any casting enemy meets the interrupt percentage criteria
+    const castingEnemies = combat.targets.filter(enemy => 
+      !enemy.deadOrGhost && 
+      me.distanceTo(enemy) <= 10 &&
+      enemy.isCastingOrChanneling &&
+      me.isFacing(enemy) &&
+      me.withinLineOfSight(enemy)
+    );
+
+    for (const enemy of castingEnemies) {
+      const castInfo = enemy.spellInfo;
+      if (!castInfo) continue;
+
+      const currentTime = wow.frameTime;
+      const castRemains = castInfo.castEnd - currentTime;
+      const castTime = castInfo.castEnd - castInfo.castStart;
+      const castPctRemain = (castRemains / castTime) * 100;
+      const channelTime = currentTime - castInfo.channelStart;
+      
+      // For channels, use time-based check (similar to Spell.js logic)
+      if (enemy.isChanneling) {
+        const randomInterruptTime = 700 + (Math.random() * 800 - 400); // 300-1100ms
+        if (channelTime > randomInterruptTime) {
+          return true;
+        }
+      } else {
+        // For casts, use percentage-based check
+        if (castPctRemain <= Settings.InterruptPercentage) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   getFriendsUnderHealthPercent(percentage) {
@@ -1600,7 +1703,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend && 
       !friend.deadOrGhost && 
       me.distanceTo(friend) <= 40 &&
-      friend.pctHealth <= percentage
+      friend.effectiveHealthPercent <= percentage
     );
   }
 
@@ -1620,6 +1723,33 @@ export class JmrRestoDruidBehavior extends Behavior {
       !enemy.deadOrGhost && 
       me.distanceTo(enemy) <= range
     ).length;
+  }
+
+  getAttackableEnemiesInRange(range) {
+    // Get enemies that are actually valid for DPS (for cat form vs Wrath decisions)
+    return me.getEnemies(range).filter(enemy => 
+      !enemy.deadOrGhost && 
+      me.distanceTo(enemy) <= range &&
+      me.canAttack(enemy) &&
+      !enemy.isImmune() &&
+      !this.isBlacklistedEnemy(enemy) &&
+      this.isValidDPSTarget(enemy)
+    ).length;
+  }
+
+  isBlacklistedEnemy(enemy) {
+    // Check if enemy should be excluded from melee range calculations
+    if (!enemy || !enemy.name) return false;
+    
+    const enemyName = enemy.name.toLowerCase();
+    
+    // Blacklisted enemy types
+    const blacklistedNames = [
+      "bloodworker",
+      "grasping blood"
+    ];
+    
+    return blacklistedNames.some(name => enemyName.includes(name));
   }
 
   hasEfflorescenceActive() {
@@ -1760,7 +1890,7 @@ export class JmrRestoDruidBehavior extends Behavior {
         return me.hasAura(auras.fluidForm);
       case "Rip":
         // Check if we have access to Rip ability (cat form DPS)
-        return spell.isKnown(1079);
+        return me.hasAura(1079);
       default:
         // Generic talent check by name
         return me.hasAura(talentName);
@@ -1829,8 +1959,8 @@ export class JmrRestoDruidBehavior extends Behavior {
       const ripRemaining = ripAura ? ripAura.remaining : 0;
       
              if (!hasRip || ripRemaining < 10000) {
-         // Check TTD for current target
-         if (this.getTimeToDeath(me.targetUnit) >= (Settings.RipMinTTD * 1000)) {
+         // Check TTD for current target (if TTD respect is enabled)
+         if (!Settings.RespectRipTTD || this.getTimeToDeath(me.targetUnit) >= (Settings.RipMinTTD * 1000)) {
            return me.target;
          }
        }
@@ -1845,9 +1975,9 @@ export class JmrRestoDruidBehavior extends Behavior {
        !unit.isImmune() && 
        me.withinLineOfSight(unit) && 
        me.canAttack(unit) &&
-       this.isValidDPSTarget(unit) &&
-       this.getTimeToDeath(unit) >= (Settings.RipMinTTD * 1000) &&
-       !unit.getAuraByMe("Rip")
+      this.isValidDPSTarget(unit) &&
+      (!Settings.RespectRipTTD || this.getTimeToDeath(unit) >= (Settings.RipMinTTD * 1000)) &&
+      !unit.getAuraByMe("Rip")
      ) || null;
   }
 
@@ -1859,8 +1989,8 @@ export class JmrRestoDruidBehavior extends Behavior {
       const rakeRemaining = rakeAura ? rakeAura.remaining : 0;
       
       if (!hasRake || rakeRemaining < 3000) {
-        // Check TTD for current target
-        if (this.getTimeToDeath(me.targetUnit) >= (Settings.RakeMinTTD * 1000)) {
+        // Check TTD for current target (if TTD respect is enabled)
+        if (!Settings.RespectRakeTTD || this.getTimeToDeath(me.targetUnit) >= (Settings.RakeMinTTD * 1000)) {
           return me.target;
         }
       }
@@ -1876,7 +2006,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       me.withinLineOfSight(unit) && 
       me.canAttack(unit) &&
       this.isValidDPSTarget(unit) &&
-      this.getTimeToDeath(unit) >= (Settings.RakeMinTTD * 1000) &&
+      (!Settings.RespectRakeTTD || this.getTimeToDeath(unit) >= (Settings.RakeMinTTD * 1000)) &&
       !unit.getAuraByMe("Rake")
     ) || null;
   }
@@ -2066,7 +2196,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       !friend.hasVisibleAura(auras.rejuvenation)
     );
     
-    return friendsWithoutRejuv.sort((a, b) => a.pctHealth - b.pctHealth)[0] || null;
+    return friendsWithoutRejuv.sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent)[0] || null;
   }
 
   getRampRejuvTarget5() {
@@ -2083,7 +2213,7 @@ export class JmrRestoDruidBehavior extends Behavior {
   getRampGroveGuardianTarget() {
     // If everyone is full health (>90%), cast on me
     const lowHealthFriends = heal.friends.All.filter(friend => 
-      friend && !friend.deadOrGhost && friend.pctHealth <= 90
+      friend && !friend.deadOrGhost && friend.effectiveHealthPercent <= 90
     );
     
     if (lowHealthFriends.length === 0) {
@@ -2351,6 +2481,15 @@ export class JmrRestoDruidBehavior extends Behavior {
     );
   }
 
+  findFriendWithMythicDebuff() {
+    return heal.friends.All.find(friend => 
+      friend && 
+      !friend.deadOrGhost && 
+      me.distanceTo(friend) <= 40 && 
+      friend.hasVisibleAura(440313)
+    );
+  }
+
   getFluidFormMeleeTarget() {
     // Find nearest enemy in combat with me or my tank within melee range (8 yards)
     const validTargets = me.getUnitsAround(8).filter(unit => 
@@ -2462,9 +2601,10 @@ export class JmrRestoDruidBehavior extends Behavior {
   }
 
   canShiftForms() {
-    // Check if enough time has passed since last form shift
+    // Check if enough time has passed since last form shift and we're not form-locked
     const timeSinceShift = Date.now() - this.lastFormShiftTime;
-    return timeSinceShift >= Settings.FormShiftDelay;
+    const notFormLocked = !me.hasVisibleAura(432031); // Form-locking aura
+    return timeSinceShift >= Settings.FormShiftDelay && notFormLocked;
   }
 
   trackFormShift() {
@@ -2769,10 +2909,10 @@ export class JmrRestoDruidBehavior extends Behavior {
         
         const lowestAlly = this.getLowestHealthAlly();
         if (lowestAlly) {
-          const healthColor = lowestAlly.pctHealth <= 50 ? 
+          const healthColor = lowestAlly.effectiveHealthPercent <= 50 ? 
             { r: 1.0, g: 0.2, b: 0.2, a: 1.0 } : 
             { r: 0.2, g: 1.0, b: 0.2, a: 1.0 };
-          imgui.textColored(healthColor, `Lowest: ${lowestAlly.unsafeName} (${lowestAlly.pctHealth.toFixed(1)}%)`);
+          imgui.textColored(healthColor, `Lowest: ${lowestAlly.unsafeName} (${lowestAlly.effectiveHealthPercent.toFixed(1)}%)`);
         }
         
         const friendsNeedingHealing = this.getFriendsUnderHealthPercent(80);
@@ -2827,7 +2967,7 @@ export class JmrRestoDruidBehavior extends Behavior {
         const currentTarget = this.getCurrentTarget();
         if (currentTarget) {
           imgui.textColored({ r: 0.2, g: 1.0, b: 0.2, a: 1.0 }, `Target: ${currentTarget.unsafeName}`);
-          imgui.text(`Health: ${currentTarget.pctHealth.toFixed(1)}%`);
+          imgui.text(`Health: ${currentTarget.effectiveHealthPercent.toFixed(1)}%`);
           
           // Show DoT status
           const hasSunfire = currentTarget.hasAura(auras.sunfire);

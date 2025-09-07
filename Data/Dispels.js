@@ -145,6 +145,7 @@ export const dispels = {
   438618: DispelPriority.Low,  // Venomous Spit
   461630: DispelPriority.Low,  // Venomous Spray
   426308: DispelPriority.Low,  // Void Infection
+  440313: DispelPriority.High,  // Void Infection
 
   // S3
   1213805: DispelPriority.Low,
@@ -273,7 +274,6 @@ export const dispels = {
   431309: DispelPriority.Low,
   431491: DispelPriority.Low,
   431494: DispelPriority.Low,
-  432031: DispelPriority.Low,
   432117: DispelPriority.Low,
   432448: DispelPriority.Low,
   433740: DispelPriority.Low,
@@ -327,7 +327,6 @@ export const dispels = {
   454440: DispelPriority.Low,
   456773: DispelPriority.Low,
   460867: DispelPriority.Low,
-  461487: DispelPriority.Low,
   461630: DispelPriority.Low,
   462735: DispelPriority.Low,
   462737: DispelPriority.Low,
