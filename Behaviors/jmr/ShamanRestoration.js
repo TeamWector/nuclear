@@ -182,7 +182,7 @@ export class ShamanRestorationBehavior extends Behavior {
             () => (me.inCombat() || this.getTank() && this.getTank().inCombat()) && wow.frameTime - this.lastDamageCheck > 200 && me.pctPower > 15,
             new bt.Selector(
               this.damageRotation()
-            )
+            ), "Damage Rotation"
           ),
         )
       )

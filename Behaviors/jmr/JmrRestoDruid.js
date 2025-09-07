@@ -377,6 +377,13 @@ export class JmrRestoDruidBehavior extends Behavior {
             this.getMarkOfTheWildTarget() !== null &&
             !spell.getLastSuccessfulSpells(2).find(spell => spell.name === "Mark of the Wild")
           ),
+
+        // Nature's Cure for dispels
+        spell.dispel("Nature's Cure", true, DispelPriority.Low, true, WoWDispelType.Magic, WoWDispelType.Curse, WoWDispelType.Poison),
+        spell.cast("Nature's Cure", on => this.findFriendWithMythicDebuff(), req => 
+            this.findFriendWithMythicDebuff() !== null
+        ),
+        spell.dispel("Soothe", false, DispelPriority.Low, false, WoWDispelType.Enrage),
           
           // Emergency healing (highest priority)
           new bt.Decorator(
@@ -637,14 +644,7 @@ export class JmrRestoDruidBehavior extends Behavior {
        spell.interrupt("Incapacitating Roar", false, 10)
      ),
 
-     spell.interrupt("Skull Bash"),
-       
-       // Nature's Cure for dispels
-      spell.dispel("Nature's Cure", true, DispelPriority.Low, true, WoWDispelType.Magic, WoWDispelType.Curse, WoWDispelType.Poison),
-      spell.cast("Nature's Cure", on => this.findFriendWithMythicDebuff(), req => 
-        this.findFriendWithMythicDebuff() !== null
-      ),
-      spell.dispel("Soothe", false, DispelPriority.Low, false, WoWDispelType.Enrage)
+     spell.interrupt("Skull Bash", false, 4),
     );
   }
 
