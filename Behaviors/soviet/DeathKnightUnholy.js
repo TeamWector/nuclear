@@ -202,7 +202,7 @@ export class DeathKnightUnholy extends Behavior {
 
   useTrinkets() {
     return new bt.Selector(
-      common.useEquippedItemByName("Incorporeal Essence-Gorger"),
+      common.useEquippedItemByName("Cursed Stone Idol"),
     );
   }
 
