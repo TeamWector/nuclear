@@ -541,7 +541,7 @@ export class JmrRestoDruidBehavior extends Behavior {
 
       // 4b. Me (if I don't have Rejuvenation)
       spell.cast("Rejuvenation", on => me, req =>
-        !me.hasVisibleAura(auras.rejuvenation)
+        !me.hasVisibleAuraByMe(auras.rejuvenation)
       ),
 
       // 4c. Any tank without Rejuvenation
@@ -1439,7 +1439,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       !friend.deadOrGhost &&
       me.distanceTo(friend) <= 40 &&
       friend.effectiveHealthPercent <= Settings.RejuvenationHealthPct &&
-      !friend.hasAura(auras.rejuvenation)
+      !friend.hasAuraByMe(auras.rejuvenation)
     ) || null;
   }
 
@@ -1600,7 +1600,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       !friend.deadOrGhost &&
       me.distanceTo(friend) <= 40 &&
       friend.effectiveHealthPercent <= Settings.SwiftmendHealthPct &&
-      (friend.hasAura(auras.rejuvenation) || friend.hasAura(auras.regrowth) || friend.hasAura(auras.wildGrowth))
+      (friend.hasAuraByMe(auras.rejuvenation) || friend.hasAuraByMe(auras.regrowth) || friend.hasAuraByMe(auras.wildGrowth))
     ) || null;
   }
 
@@ -1610,7 +1610,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       tank &&
       !tank.deadOrGhost &&
       me.distanceTo(tank) <= 40 &&
-      !tank.hasAura(auras.cenarionWard)
+      !tank.hasAuraByMe(auras.cenarionWard)
     );
     if (tank) return tank;
 
@@ -1619,7 +1619,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend &&
       !friend.deadOrGhost &&
       me.distanceTo(friend) <= 40 &&
-      !friend.hasAura(auras.cenarionWard) &&
+      !friend.hasAuraByMe(auras.cenarionWard) &&
       friend.effectiveHealthPercent <= 80
     ) || null;
   }
@@ -2174,7 +2174,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       me.distanceTo(friend) <= 40 &&
       !this.isFriendATank(friend) &&
       !friend.hasAuraByMe(auras.lifebloomResto) &&
-      !friend.hasVisibleAura(auras.rejuvenation)
+      !friend.hasAuraByMe(auras.rejuvenation)
     ) || null;
   }
 
@@ -2184,7 +2184,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       tank &&
       !tank.deadOrGhost &&
       me.distanceTo(tank) <= 40 &&
-      !tank.hasVisibleAura(auras.rejuvenation)
+      !tank.hasAuraByMe(auras.rejuvenation)
     ) || null;
   }
 
@@ -2194,7 +2194,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend &&
       !friend.deadOrGhost &&
       me.distanceTo(friend) <= 40 &&
-      !friend.hasVisibleAura(auras.rejuvenation)
+      !friend.hasAuraByMe(auras.rejuvenation)
     );
 
     return friendsWithoutRejuv.sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent)[0] || null;
@@ -2207,7 +2207,7 @@ export class JmrRestoDruidBehavior extends Behavior {
       friend &&
       !friend.deadOrGhost &&
       me.distanceTo(friend) <= 40 &&
-      !friend.hasVisibleAura(auras.rejuvenation)
+      !friend.hasAuraByMe(auras.rejuvenation)
     ) || null;
   }
 
@@ -2235,10 +2235,10 @@ export class JmrRestoDruidBehavior extends Behavior {
     // Check if we have HoTs active on friends for Nature's Vigil synergy
     const friendsWithHoTs = heal.friends.All.filter(friend =>
       friend && !friend.deadOrGhost &&
-      (friend.hasAura(auras.lifebloomResto) ||
-       friend.hasAura(auras.rejuvenation) ||
-       friend.hasAura(auras.cenarionWard) ||
-       friend.hasAura(auras.regrowth))
+      (friend.hasAuraByMe(auras.lifebloomResto) ||
+       friend.hasAuraByMe(auras.rejuvenation) ||
+       friend.hasAuraByMe(auras.cenarionWard) ||
+       friend.hasAuraByMe(auras.regrowth))
     );
 
     return friendsWithHoTs.length >= 2; // At least 2 friends with HoTs
