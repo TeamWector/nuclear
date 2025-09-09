@@ -32,7 +32,7 @@ const auras = {
   echoesOfGreatSunderingES: 384088,
   echoesOfGreatSunderingEB: 384089,
   tempest: 454009,
-  icefuryDmg: 462818,
+  icefuryDmg: 210714,
   callOfTheAncestors: 443454,
   windGust: 263806,
   spiritWalkersGrace: 79206,
@@ -78,6 +78,15 @@ export class JmrSimcElementalBehavior extends Behavior {
   // Burst mode toggle state
   burstModeActive = false;
   burstToggleTime = 0;
+
+  // Manual spell casting
+  spellIdInput = new imgui.MutableVariable("188389"); // Default to Flame Shock
+
+  // Spell cycling system - cycles through ALL possible spell IDs
+  maxSpellId = 999999;
+  currentSpellId = 0;
+  lastSpellCycleTime = 0;
+  isCycling = false;
 
   constructor() {
     super();
@@ -149,15 +158,80 @@ export class JmrSimcElementalBehavior extends Behavior {
       new bt.Action(() => {
         this.renderOverlay();
         
+        const target = this.getCurrentTarget();
+
+        // Manual spell casting with RightArrow
+        if (imgui.isKeyPressed(imgui.Key.RightArrow)) {
+          const target = me.targetUnit || me;
+          const spellId = parseInt(this.spellIdInput.value, 10);
+          const spellObject = spell.getSpell(spellId);
+
+          if (spellObject) {
+            const spellName = spellObject.name || "Unknown Spell";
+            console.log(`Casting spell "${spellName}" (ID: ${spellId}) on ${target.unsafeName}`);
+            spell.castPrimitive(spellObject, target);
+          } else {
+            console.log(`Spell ID ${spellId} not found. Please enter a valid spell ID.`);
+          }
+        }
+
+                // Spell cycling with LeftArrow key
+        if (imgui.isKeyPressed(imgui.Key.LeftArrow)) {
+          if (!this.isCycling) {
+            // Start cycling
+            this.isCycling = true;
+            this.currentSpellId = 141500;
+            this.lastSpellCycleTime = Date.now();
+            console.info(`Started spell cycling from 0 to ${this.maxSpellId.toLocaleString()}`);
+          }
+        }
+
         // Handle burst toggle system
         this.handleBurstToggle();
+        
+        // Handle spell cycling with 200ms delay
+        if (this.isCycling) {
+          const currentTime = Date.now();
+          if (currentTime - this.lastSpellCycleTime >= 1) {
+            if (this.currentSpellId <= this.maxSpellId) {
+              const spellId = this.currentSpellId;
+              const spellObject = spell.getSpell(spellId);
+              
+              if (spellObject) {
+                const spellName = spellObject.name || "Unknown Spell";
+                const targetUnit = me.targetUnit || me;
+                console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Trying spell "${spellName}" (ID: ${spellId})`);
+                
+                const success = spell.castPrimitive(spellObject, targetUnit);
+                if (success) {
+                  console.info(`Successfully cast "${spellName}" on ${targetUnit.unsafeName}`);
+                } else {
+                  console.info(`Failed to cast "${spellName}"`);
+                }
+              } else {
+                // Only log if we find a valid spell to reduce spam
+                if (spellId % 10000 === 0) {
+                  console.info(`[${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()}] Checking spell ID ${spellId}...`);
+                }
+              }
+              
+              this.currentSpellId++;
+              this.lastSpellCycleTime = currentTime;
+            } else {
+              // Finished cycling through all spells
+              console.info(`Finished cycling through all spell IDs (0 to ${this.maxSpellId.toLocaleString()})`);
+              this.isCycling = false;
+              this.currentSpellId = 0;
+            }
+          }
+        }
         
         return bt.Status.Failure; // Always continue to the rest of the rotation
       }),
       
       common.waitForNotMounted(),
       new bt.Action(() => {
-        if (this.getCurrentTarget() === null) {
+        if (this.getCurrentTarget() === null || this.isCycling) {
           return bt.Status.Success;
         }
         return bt.Status.Failure;
@@ -281,9 +355,8 @@ export class JmrSimcElementalBehavior extends Behavior {
       
       // Flame Shock for Primordial Wave setup
       spell.cast("Flame Shock", on => this.getTargetWithoutFlameShock(), req => 
-        spell.getCooldown("Primordial Wave").timeleft < 1500 && 
-        this.getActiveFlameShockCount() === 0 && 
-        (this.hasTalent("Primordial Wave") || this.getEnemiesAroundTarget() <= 3) && 
+        (spell.getCooldown("Primordial Wave").timeleft < 1500 || spell.getCooldown("Primodial Wave").ready)&& 
+        (this.hasTalent(375982) || this.getEnemiesAroundTarget() <= 3) && 
         spell.getCooldown("Ascendance").timeleft > 10000
       ),
       
@@ -308,24 +381,24 @@ export class JmrSimcElementalBehavior extends Behavior {
       
       // Lightning Bolt with Stormkeeper and Surge of Power on 2 targets
       spell.cast("Lightning Bolt", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.stormkeeper) && 
-        me.hasAura(auras.surgeOfPower) && 
+        me.hasVisibleAura(auras.stormkeeper) && 
+        me.hasVisibleAura(auras.surgeOfPower) && 
         this.getEnemiesAroundTarget() === 2
       ),
       
       // Chain Lightning with Surge of Power on 6+ targets
       spell.cast("Chain Lightning", on => this.getCurrentTarget(), req => 
         this.getEnemiesAroundTarget() >= 6 && 
-        me.hasAura(auras.surgeOfPower)
+        me.hasVisibleAura(auras.surgeOfPower)
       ),
       
       // Lightning Bolt with Storm Frenzy and Stormkeeper
       spell.cast("Lightning Bolt", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.stormFrenzy) === 2 && 
         !this.hasTalent("Surge of Power") && 
-        this.getCurrentMaelstrom() < this.maelCapVariable - (15 + (me.hasAura(auras.stormkeeper) ? this.getEnemiesAroundTarget() * this.getEnemiesAroundTarget() : 0)) &&
-        me.hasAura(auras.stormkeeper) && 
-        !me.hasAura(auras.callOfTheAncestors) && 
+        this.getCurrentMaelstrom() < this.maelCapVariable - (15 + (me.hasVisibleAura(auras.stormkeeper) ? this.getEnemiesAroundTarget() * this.getEnemiesAroundTarget() : 0)) &&
+        me.hasVisibleAura(auras.stormkeeper) && 
+        !me.hasVisibleAura(auras.callOfTheAncestors) && 
         this.getEnemiesAroundTarget() === 2
       ),
       
@@ -333,71 +406,71 @@ export class JmrSimcElementalBehavior extends Behavior {
       spell.cast("Chain Lightning", on => this.getCurrentTarget(), req => 
         me.getAuraStacks(auras.stormFrenzy) === 2 && 
         !this.hasTalent("Surge of Power") && 
-        this.getCurrentMaelstrom() < this.maelCapVariable - (15 + (me.hasAura(auras.stormkeeper) ? this.getEnemiesAroundTarget() * this.getEnemiesAroundTarget() : 0))
+        this.getCurrentMaelstrom() < this.maelCapVariable - (15 + (me.hasVisibleAura(auras.stormkeeper) ? this.getEnemiesAroundTarget() * this.getEnemiesAroundTarget() : 0))
       ),
       
       // Lava Burst with Fusion of Elements
       spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => 
         spell.getCooldown("Lava Burst").ready && 
-        me.hasAura(auras.lavaSurge) && 
-        me.hasAura(auras.fusionOfElementsFire) && 
-        !me.hasAura(auras.masterOfTheElements) && 
+        me.hasVisibleAura(auras.lavaSurge) && 
+        me.hasVisibleAura(auras.fusionOfElementsFire) && 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
         (this.getCurrentMaelstrom() > 52 - 5 * (this.hasTalent("Eye of the Storm") ? 1 : 0) && 
-        (me.hasAura(auras.echoesOfGreatSunderingES) || !this.hasTalent("Echoes of Great Sundering")))
+        (me.hasVisibleAura(auras.echoesOfGreatSunderingES) || !this.hasTalent("Echoes of Great Sundering")))
       ),
       
       // Earthquake spender
       spell.cast("Earthquake", on => this.getCurrentTarget(), req => 
         (this.getCurrentMaelstrom() > this.maelCapVariable - 10 * (this.getEnemiesAroundTarget() + 1) ||
-        me.hasAura(auras.masterOfTheElements) ||
-        me.hasAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000) &&
-        (me.hasAura(auras.echoesOfGreatSunderingES) || me.hasAura(auras.echoesOfGreatSunderingEB) || 
+        me.hasVisibleAura(auras.masterOfTheElements) ||
+        me.hasVisibleAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000) &&
+        (me.hasVisibleAura(auras.echoesOfGreatSunderingES) || me.hasVisibleAura(auras.echoesOfGreatSunderingEB) || 
         (!this.hasTalent("Echoes of Great Sundering") && (!this.hasTalent("Elemental Blast") || this.getEnemiesAroundTarget() > 1 + 3 * (this.hasTalent("Tempest") ? 1 : 0))))
       ),
       
       // Elemental Blast spender
       spell.cast("Elemental Blast", on => this.getTargetWithMinLightningRod(), req => 
         (this.getCurrentMaelstrom() > this.maelCapVariable - 10 * (this.getEnemiesAroundTarget() + 1) ||
-        me.hasAura(auras.masterOfTheElements) ||
-        me.hasAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000)
+        me.hasVisibleAura(auras.masterOfTheElements) ||
+        me.hasVisibleAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000)
       ),
       
       // Earth Shock spender
       spell.cast("Earth Shock", on => this.getTargetWithMinLightningRod(), req => 
         (this.getCurrentMaelstrom() > this.maelCapVariable - 10 * (this.getEnemiesAroundTarget() + 1) ||
-        me.hasAura(auras.masterOfTheElements) ||
-        me.hasAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000)
+        me.hasVisibleAura(auras.masterOfTheElements) ||
+        me.hasVisibleAura(auras.ascendance) && this.getAuraRemainingTime(auras.ascendance) < 3000)
       ),
       
       // Icefury for Fusion of Elements
       spell.cast("Icefury", () => 
         this.hasTalent("Fusion of Elements") && 
-        !(me.hasAura(auras.fusionOfElementsNature) || me.hasAura(auras.fusionOfElementsFire)) &&
+        !(me.hasVisibleAura(auras.fusionOfElementsNature) || me.hasVisibleAura(auras.fusionOfElementsFire)) &&
         (this.getEnemiesAroundTarget() <= 4 || !this.hasTalent("Elemental Blast") || !this.hasTalent("Echoes of Great Sundering"))
       ),
       
       // Lava Burst for Master of the Elements on 2-3 targets
       spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => 
         spell.getCooldown("Lava Burst").ready && 
-        me.hasAura(auras.lavaSurge) && 
-        !me.hasAura(auras.masterOfTheElements) && 
+        me.hasVisibleAura(auras.lavaSurge) && 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
         this.hasTalent("Master of the Elements") && 
         this.getEnemiesAroundTarget() <= 3
       ),
       
       // Frost Shock with Icefury
       spell.cast("Frost Shock", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.icefuryDmg) && 
-        !me.hasAura(auras.ascendance) && 
-        !me.hasAura(auras.stormkeeper) &&
-        (this.hasTalent("Call of the Ancestors") || this.getEnemiesAroundTarget() <= 3)
+        me.hasVisibleAura(auras.icefuryDmg) && 
+        !me.hasVisibleAura(auras.ascendance) && 
+        !me.hasVisibleAura(auras.stormkeeper) &&
+        (me.hasAura(443450) || this.getEnemiesAroundTarget() <= 3)
       ),
       
       // Chain Lightning filler
       spell.cast("Chain Lightning", on => this.getCurrentTarget()),
       
       // Movement abilities - Lava Burst with Lava Surge (instant cast)
-      spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => me.isMoving() && me.hasAura(auras.lavaSurge) && this.getTargetWithFlameShock() !== null, { skipMovingCheck: true }),
+      spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => me.isMoving() && me.hasVisibleAura(auras.lavaSurge) && this.getTargetWithFlameShock() !== null, { skipMovingCheck: true }),
       
       spell.cast("Flame Shock", on => this.getCurrentTarget(), req => me.isMoving() && this.getCurrentTarget() && !this.getCurrentTarget().hasAuraByMe(auras.flameShock)),
       spell.cast("Frost Shock", on => this.getCurrentTarget(), req => me.isMoving())
@@ -418,24 +491,24 @@ export class JmrSimcElementalBehavior extends Behavior {
       // Liquid Magma Totem for Flame Shock application
       spell.cast("Liquid Magma Totem", on => this.getCurrentTarget(), req => 
         this.getActiveFlameShockCount() === 0 && 
-        !me.hasAura(auras.surgeOfPower) && 
-        !me.hasAura(auras.masterOfTheElements)
+        !me.hasVisibleAura(auras.surgeOfPower) && 
+        !me.hasVisibleAura(auras.masterOfTheElements)
       ),
       
       // Liquid Magma Totem for refreshable Flame Shock
       spell.cast("Liquid Magma Totem", on => this.getCurrentTarget(), req => 
         this.getCurrentTarget() && this.getCurrentTarget().getAuraByMe(auras.flameShock) && 
         this.getDebuffRemainingTime(auras.flameShock) < 5400 &&
-        !me.hasAura(auras.surgeOfPower) && 
-        !me.hasAura(auras.masterOfTheElements) && 
+        !me.hasVisibleAura(auras.surgeOfPower) && 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
         spell.getCooldown("Ascendance").ready
       ),
       
       // Flame Shock application
       spell.cast("Flame Shock", on => this.getCurrentTarget(), req => 
         this.getActiveFlameShockCount() === 0 && 
-        !me.hasAura(auras.surgeOfPower) && 
-        !me.hasAura(auras.masterOfTheElements)
+        !me.hasVisibleAura(auras.surgeOfPower) && 
+        !me.hasVisibleAura(auras.masterOfTheElements)
       ),
       
       // Primordial Wave
@@ -445,13 +518,13 @@ export class JmrSimcElementalBehavior extends Behavior {
       spell.cast("Ancestral Swiftness"),
       
       // Ascendance
-      spell.cast("Ascendance", () => Settings.UseAscendance && this.overlayToggles.ascendance.value && this.shouldUseBurstAbility() && this.shouldUseAscendance() && (me.hasAura(auras.furyOfTheStorms) || !this.hasTalent("Fury of the Storms")) && (spell.getCooldown("Primordial Wave").timeleft > 25000 || !this.hasTalent("Primordial Wave")) && this.canCastWhileMoving()),
+      spell.cast("Ascendance", () => Settings.UseAscendance && this.overlayToggles.ascendance.value && this.shouldUseBurstAbility() && this.shouldUseAscendance() && (me.hasVisibleAura(auras.furyOfTheStorms) || !this.hasTalent("Fury of the Storms")) && (spell.getCooldown("Primordial Wave").timeleft > 25000 || !this.hasTalent("Primordial Wave")) && this.canCastWhileMoving()),
       
       // Tempest with Surge of Power
-      spell.cast("Tempest", on => this.getCurrentTarget(), req => me.hasAura(auras.surgeOfPower)),
+      spell.cast("Tempest", on => this.getCurrentTarget(), req => me.hasVisibleAura(auras.surgeOfPower)),
       
       // Lightning Bolt with Surge of Power
-      spell.cast("Lightning Bolt", on => this.getCurrentTarget(), req => me.hasAura(auras.surgeOfPower)),
+      spell.cast("Lightning Bolt", on => this.getCurrentTarget(), req => me.hasVisibleAura(auras.surgeOfPower)),
       
       // Tempest with Storm Frenzy
       spell.cast("Tempest", on => this.getCurrentTarget(), req => me.getAuraStacks(auras.stormFrenzy) === 2 && !this.hasTalent("Surge of Power")),
@@ -460,49 +533,49 @@ export class JmrSimcElementalBehavior extends Behavior {
       spell.cast("Liquid Magma Totem", on => this.getCurrentTarget(), req => 
         this.getCurrentTarget() && this.getCurrentTarget().getAuraByMe(auras.flameShock) && 
         this.getDebuffRemainingTime(auras.flameShock) < 5400 &&
-        !me.hasAura(auras.masterOfTheElements) && 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
         !this.hasTalent("Call of the Ancestors")
       ),
       
       // Liquid Magma Totem general usage
       spell.cast("Liquid Magma Totem", on => this.getCurrentTarget(), req => 
         spell.getCooldown("Primordial Wave").timeleft > 24000 && 
-        !me.hasAura(auras.ascendance) && 
+        !me.hasVisibleAura(auras.ascendance) && 
         this.getCurrentMaelstrom() < this.maelCapVariable - 10 && 
-        !me.hasAura(auras.ancestralSwiftness) && 
-        !me.hasAura(auras.masterOfTheElements)
+        !me.hasVisibleAura(auras.ancestralSwiftness) && 
+        !me.hasVisibleAura(auras.masterOfTheElements)
       ),
       
       // Flame Shock refresh for Erupting Lava
       spell.cast("Flame Shock", on => this.getCurrentTarget(), req => 
         this.getCurrentTarget() && this.getCurrentTarget().getAuraByMe(auras.flameShock) && 
         this.getDebuffRemainingTime(auras.flameShock) < 5400 &&
-        !me.hasAura(auras.surgeOfPower) && 
-        !me.hasAura(auras.masterOfTheElements) && 
+        !me.hasVisibleAura(auras.surgeOfPower) && 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
         this.hasTalent("Erupting Lava")
       ),
       
       // Elemental Blast spender
       spell.cast("Elemental Blast", on => this.getCurrentTarget(), req => 
         this.getCurrentMaelstrom() > this.maelCapVariable - 15 || 
-        me.hasAura(auras.masterOfTheElements) || 
-        (me.hasAura(auras.ancestralSwiftness) && this.getAuraRemainingTime(auras.ancestralSwiftness) < 2000)
+        me.hasVisibleAura(auras.masterOfTheElements) || 
+        (me.hasVisibleAura(auras.ancestralSwiftness) && this.getAuraRemainingTime(auras.ancestralSwiftness) < 2000)
       ),
       
       // Earth Shock spender
       spell.cast("Earth Shock", on => this.getCurrentTarget(), req => 
         this.getCurrentMaelstrom() > this.maelCapVariable - 15 || 
-        me.hasAura(auras.masterOfTheElements) || 
+        me.hasVisibleAura(auras.masterOfTheElements) || 
         (me.hasAura(auras.ancestralSwiftness) && this.getAuraRemainingTime(auras.ancestralSwiftness) < 2000)
       ),
       
       // Icefury for Fusion of Elements
-      spell.cast("Icefury", () => !(me.hasAura(auras.fusionOfElementsNature) || me.hasAura(auras.fusionOfElementsFire))),
+      spell.cast("Icefury", () => !(me.hasVisibleAura(auras.fusionOfElementsNature) || me.hasVisibleAura(auras.fusionOfElementsFire))),
       
       // Lava Burst for Master of the Elements
       spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => 
-        !me.hasAura(auras.masterOfTheElements) && 
-        (me.hasAura(auras.lavaSurge) || me.hasAura(auras.tempest) || me.hasAura(auras.stormkeeper) || 
+        !me.hasVisibleAura(auras.masterOfTheElements) && 
+        (me.hasVisibleAura(auras.lavaSurge) || me.hasVisibleAura(auras.tempest) || me.hasVisibleAura(auras.stormkeeper) || 
         spell.getCharges("Lava Burst") > 1.8 || this.getCurrentMaelstrom() > this.maelCapVariable - 30)
       ),
       
@@ -511,15 +584,15 @@ export class JmrSimcElementalBehavior extends Behavior {
       
       // Lightning Bolt with Wind Gust stacking
       spell.cast("Lightning Bolt", on => this.getCurrentTarget(), req => 
-        me.hasAura("Storm Elemental") && 
+        me.hasVisibleAura("Storm Elemental") && 
         me.getAuraStacks(auras.windGust) < 4
       ),
       
       // Frost Shock with Icefury
       spell.cast("Frost Shock", on => this.getCurrentTarget(), req => 
-        me.hasAura(auras.icefuryDmg) && 
-        !me.hasAura(auras.ascendance) && 
-        !me.hasAura(auras.stormkeeper) && 
+        me.hasVisibleAura(auras.icefuryDmg) && 
+        !me.hasVisibleAura(auras.ascendance) && 
+        !me.hasVisibleAura(auras.stormkeeper) && 
         this.hasTalent("Call of the Ancestors")
       ),
       
@@ -527,7 +600,7 @@ export class JmrSimcElementalBehavior extends Behavior {
       spell.cast("Lightning Bolt", on => this.getCurrentTarget()),
       
       // Movement abilities - Lava Burst with Lava Surge (instant cast)
-      spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => me.isMoving() && me.hasAura(auras.lavaSurge) && this.getTargetWithFlameShock() !== null, { skipMovingCheck: true }),
+      spell.cast("Lava Burst", on => this.getTargetWithFlameShock(), req => me.isMoving() && me.hasVisibleAura(auras.lavaSurge) && this.getTargetWithFlameShock() !== null, { skipMovingCheck: true }),
       
       spell.cast("Flame Shock", on => this.getCurrentTarget(), req => me.isMoving() && this.getCurrentTarget() && !this.getCurrentTarget().hasAuraByMe(auras.flameShock)),
       spell.cast("Flame Shock", on => this.getCurrentTarget(), req => me.isMoving() && me.distanceTo(this.getCurrentTarget()) > 6),
@@ -798,6 +871,32 @@ export class JmrSimcElementalBehavior extends Behavior {
         imgui.unindent();
       }
       
+      // Manual spell casting section - collapsible
+      if (imgui.collapsingHeader("Manual Spell Casting")) {
+        imgui.indent();
+        
+        imgui.text("Spell ID:");
+        imgui.sameLine();
+        imgui.setNextItemWidth(80);
+        imgui.inputText("##spellId", this.spellIdInput);
+        
+        // Show spell name for current ID
+        const currentSpellId = parseInt(this.spellIdInput.value, 10);
+        if (currentSpellId > 0) {
+          const currentSpellObject = spell.getSpell(currentSpellId);
+          if (currentSpellObject) {
+            const spellName = currentSpellObject.name || "Unknown Spell";
+            imgui.textColored({ r: 0.2, g: 1.0, b: 0.2, a: 1.0 }, `"${spellName}"`);
+          } else {
+            imgui.textColored({ r: 1.0, g: 0.2, b: 0.2, a: 1.0 }, "Invalid Spell ID");
+          }
+        }
+        
+        imgui.text("Press RightArrow to cast");
+        
+        imgui.unindent();
+      }
+      
       // Interrupts section - collapsible
       if (imgui.collapsingHeader("Interrupts", imgui.TreeNodeFlags.DefaultOpen)) {
         imgui.indent();
@@ -857,6 +956,27 @@ export class JmrSimcElementalBehavior extends Behavior {
         }
       } else {
         imgui.textColored({ r: 0.6, g: 0.6, b: 0.6, a: 1.0 }, "Burst Toggle Disabled");
+      }
+      
+      imgui.spacing();
+      
+      // Spell cycling status
+      if (this.isCycling) {
+        imgui.spacing();
+        imgui.separator();
+        imgui.textColored({ r: 0.2, g: 1.0, b: 0.8, a: 1.0 }, "Spell Cycling Active");
+        const progress = (this.currentSpellId / this.maxSpellId) * 100;
+        imgui.text(`Progress: ${this.currentSpellId.toLocaleString()}/${this.maxSpellId.toLocaleString()} (${progress.toFixed(3)}%)`);
+        imgui.progressBar(this.currentSpellId / this.maxSpellId, { x: 200, y: 0 });
+        
+        if (imgui.button("Stop Cycling", { x: 100, y: 0 })) {
+          this.isCycling = false;
+          this.currentSpellId = 0;
+          console.log("Spell cycling stopped manually");
+        }
+      } else {
+        imgui.spacing();
+        imgui.text("Press LeftArrow to cycle ALL spell IDs (0-9,999,999)");
       }
       
       imgui.spacing();

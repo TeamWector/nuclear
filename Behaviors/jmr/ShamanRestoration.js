@@ -179,10 +179,10 @@ export class ShamanRestorationBehavior extends Behavior {
             )
           ),
           new bt.Decorator(
-            () => (me.inCombat() || this.getTank() && this.getTank().inCombat()) && wow.frameTime - this.lastDamageCheck > 200 && me.pctPower > 50,
+            () => (me.inCombat() || this.getTank() && this.getTank().inCombat()) && wow.frameTime - this.lastDamageCheck > 200 && me.pctPower > 15,
             new bt.Selector(
               this.damageRotation()
-            )
+            ), "Damage Rotation"
           ),
         )
       )
@@ -274,26 +274,26 @@ export class ShamanRestorationBehavior extends Behavior {
       }),
       spell.cast("Nature's Swiftness", on => me, req => {
         const lowestHealthAlly = this.getLowestHealthAlly();
-        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 70 && me.inCombat();
+        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 85 && me.inCombat();
       }),
       spell.cast("Ancestral Swiftness", on => me, req => {
         const lowestHealthAlly = this.getLowestHealthAlly();
-        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 70 && me.hasAura("Ancestral Swiftness");
+        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 85 && me.hasAura("Ancestral Swiftness");
       }),
       spell.cast("Unleash Life", on => me, req => {
         const lowestHealthAlly = this.getLowestHealthAlly();
-        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 70;
+        return lowestHealthAlly && lowestHealthAlly.effectiveHealthPercent < 85;
       }),
       spell.cast("Chain Heal", on => this.getBestChainHealTarget(), req => {
         const target = this.getBestChainHealTarget();
         if (!target) return false;
 
-        const alliesNearby = this.getAlliesInRange(target, 12);
+        const alliesNearby = this.getAlliesInRange(target, 30);
         const injuredAllies = alliesNearby.filter(ally => ally.effectiveHealthPercent < Settings.RestoShamanChainHealThreshold);
 
         return (injuredAllies.length >= 3 ||
-            (injuredAllies.length >= 2 && injuredAllies.some(ally => ally.effectiveHealthPercent < Settings.RestoShamanChainHealThreshold - 10))) &&
-          me.hasVisibleAura("High Tide");
+            (injuredAllies.length >= 2 &&
+          me.hasVisibleAura("High Tide")));
       }),
       spell.cast("Healing Wave", on => this.getLowestHealthAlly(), req => {
         const lowestHealthAlly = this.getLowestHealthAlly();
@@ -368,7 +368,39 @@ export class ShamanRestorationBehavior extends Behavior {
     );
   }
 
+  // Check if a totem is active using totemInfo (more efficient)
+  isTotemActive(totemName) {
+    if (wow.GameUI.totemInfo) {
+      for (let i = 1; i <= 6; i++) {
+        const totemInfo = wow.GameUI.totemInfo[i];
+        if (totemInfo && totemInfo.name === totemName) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  
+  // Get totem duration using totemInfo
+  getTotemDuration(totemName) {
+    if (wow.GameUI.totemInfo) {
+      for (let i = 1; i <= 6; i++) {
+        const totemInfo = wow.GameUI.totemInfo[i];
+        if (totemInfo && totemInfo.name === totemName) {
+          return totemInfo.duration || 0;
+        }
+      }
+    }
+    return 0;
+  }
+
   getTotemByName(totemName) {
+    // First check if totem exists using efficient totemInfo
+    if (!this.isTotemActive(totemName)) {
+      return null;
+    }
+    
+    // If we need the actual object (for position/distance), search for it
     let totem = null;
     objMgr.objects.forEach(obj => {
       if (obj instanceof wow.CGUnit &&
