@@ -248,7 +248,7 @@ export const interrupts = {
   325701: "Siphon Life",
   326829: "Wicked Bolt",
   328322: "Villainous Bolt",
-  323538: "Anima Bolt",
+  // 323538: "Anima Bolt",
   1229474: "Gorge",
   1229510: "Arcing Zap",
   1222815: "Arcane Bolt",
@@ -262,7 +262,7 @@ export const interrupts = {
   423051: "Burning Light",
   423665: "Embrace the Light",
   442210: "Silken Restraints",
-  432031: "Grasping Blood",
+  // 432031: "Grasping Blood",
 
   ///////////////////////////////////////////
   // PVP Interrupts
