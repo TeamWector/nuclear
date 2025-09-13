@@ -66,6 +66,14 @@ export class DruidBalancePvP extends Behavior {
         { type: "checkbox", uid: "UseMassEntanglement", text: "Use Mass Entanglement + Solar Beam combo", default: true },
         { type: "slider", uid: "CycloneMaxDR", text: "Max Cyclone DR stacks", min: 0, max: 2, default: 1 }
       ]
+    },
+    {
+      header: "DPS Targeting Settings",
+      options: [
+        { type: "checkbox", uid: "UseCycloneOnDPS", text: "Cyclone DPS with major cooldowns (when no healers available)", default: true },
+        { type: "slider", uid: "DPSCycloneMinCooldownDuration", text: "Minimum DPS cooldown duration (seconds)", min: 2, max: 10, default: 3 },
+        { type: "checkbox", uid: "PrioritizeFaerieSwarmOnDPS", text: "Prioritize Faerie Swarm disarm on DPS with cooldowns", default: true }
+      ]
     }
   ];
 
@@ -302,6 +310,8 @@ export class DruidBalancePvP extends Behavior {
 
   // Targeting methods
   cycloneTarget() {
+    if (!Settings.UseCyclone) return undefined;
+
     // Check for High Winds aura to determine cyclone range
     const cycloneRange = me.hasAura(auras.highWinds) ? 30 : 25; // 25 + 5 if High Winds, else 25
     const nearbyEnemies = me.getPlayerEnemies(cycloneRange);
@@ -309,13 +319,30 @@ export class DruidBalancePvP extends Behavior {
     // Determine max DR based on current target's health
     const maxDR = (me.target && me.target.effectiveHealthPercent < 35) ? Settings.CycloneMaxDR + 1 : Settings.CycloneMaxDR;
 
+    // Priority 1: Target healers (existing logic)
     for (const unit of nearbyEnemies) {
       if (unit.isHealer() &&
           !unit.isCCd() &&
           unit.canCC() &&
           unit.getDR("disorient") <= maxDR &&
-          unit !== me.target) { // Exclude current target
+          unit !== me.target &&
+          !pvpHelpers.hasImmunity(unit)) { // Added immunity check
+        console.info(`[Druid] Cyclone target found: Healer ${unit.unsafeName}`);
         return unit;
+      }
+    }
+
+    // Priority 2: Target DPS with major cooldowns (including current target)
+    if (Settings.UseCycloneOnDPS) {
+      for (const unit of nearbyEnemies) {
+        if (!unit.isHealer() && // DPS players
+            !unit.isCCd() &&
+            unit.canCC() &&
+            unit.getDR("disorient") <= 1 && // Only 0 DR for DPS            !pvpHelpers.hasImmunity(unit) &&
+            this.hasMajorOffensiveCooldown(unit)) {
+          console.info(`[Druid] Cyclone target found: DPS ${unit.unsafeName} with major cooldown${unit === me.target ? ' (current target)' : ''}`);
+          return unit;
+        }
       }
     }
 
@@ -390,6 +417,23 @@ export class DruidBalancePvP extends Behavior {
 
     // Get all enemy players within 30 yards
     const enemies = me.getPlayerEnemies(30);
+
+    // Priority 1: DPS with major cooldowns (if setting enabled)
+    if (Settings.PrioritizeFaerieSwarmOnDPS) {
+      for (const enemy of enemies) {
+        if (enemy.isDisarmableMelee() &&
+            !enemy.isHealer() &&
+            me.withinLineOfSight(enemy) &&
+            enemy.getDR("disarm") === 0 &&
+            !pvpHelpers.hasImmunity(enemy) &&
+            this.hasMajorOffensiveCooldown(enemy)) {
+          console.info(`[Druid] Faerie Swarm priority target: DPS ${enemy.unsafeName} with major cooldown`);
+          return enemy;
+        }
+      }
+    }
+
+    // Priority 2: Any disarmable melee (existing logic)
     for (const enemy of enemies) {
       if (enemy.isDisarmableMelee() &&
           me.withinLineOfSight(enemy) &&
@@ -442,6 +486,43 @@ export class DruidBalancePvP extends Behavior {
 
     // Use War Stomp if we have at least 2 valid enemies
     return validEnemies >= 1;
+  }
+
+  // Helper methods for DPS targeting
+  hasMajorOffensiveCooldown(unit) {
+    if (!unit || !unit.auras) return false;
+
+    const majorCooldown = pvpHelpers.hasMajorDamageCooldown(unit, Settings.DPSCycloneMinCooldownDuration);
+    if (majorCooldown) {
+      console.info(`[Druid] Found DPS ${unit.unsafeName} with major cooldown: ${majorCooldown.name} (${majorCooldown.remainingTime.toFixed(1)}s remaining)`);
+      return true;
+    }
+    return false;
+  }
+
+  isDPSPlayer(unit) {
+    return unit.isPlayer() && !unit.isHealer();
+  }
+
+  isPriorityDPSTarget(unit) {
+    return this.isDPSPlayer(unit) &&
+           this.hasMajorOffensiveCooldown(unit) &&
+           unit.getDR("disorient") === 0 &&
+           !pvpHelpers.hasImmunity(unit);
+  }
+
+  // Enhanced targeting helper for finding DPS with cooldowns
+  findDPSWithCooldowns(range = 40) {
+    const enemies = me.getPlayerEnemies(range);
+    const dpsWithCooldowns = [];
+
+    for (const enemy of enemies) {
+      if (this.isPriorityDPSTarget(enemy) && me.withinLineOfSight(enemy)) {
+        dpsWithCooldowns.push(enemy);
+      }
+    }
+
+    return dpsWithCooldowns;
   }
 }
 
