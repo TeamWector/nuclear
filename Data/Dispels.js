@@ -148,206 +148,169 @@ export const dispels = {
   440313: DispelPriority.High,  // Void Infection
 
   // S3
-  1213805: DispelPriority.Low,
-  1214523: DispelPriority.Low,
-  1215600: DispelPriority.Low,
-  1217821: DispelPriority.Low,
-  1219535: DispelPriority.Low,
-  1220390: DispelPriority.Low,
-  1221190: DispelPriority.Low,
-  1221483: DispelPriority.Low,
-  1222341: DispelPriority.Low,
-  1225175: DispelPriority.Low,
-  1226444: DispelPriority.Low,
-  1227745: DispelPriority.Low,
-  1229474: DispelPriority.Low,
-  1231497: DispelPriority.Low,
-  1235060: DispelPriority.Low,
-  1235245: DispelPriority.Low,
-  1235368: DispelPriority.Low,
-  1235762: DispelPriority.Low,
-  1235766: DispelPriority.Low,
-  1236126: DispelPriority.Low,
-  1236513: DispelPriority.Low,
-  1236614: DispelPriority.Low,
-  1237220: DispelPriority.Low,
-  1237602: DispelPriority.Low,
-  1240097: DispelPriority.Low,
-  1240912: DispelPriority.Low,
-  1241785: DispelPriority.Low,
-  1242678: DispelPriority.Low,
-  1248209: DispelPriority.Low,
-  257168: DispelPriority.Low,
-  262268: DispelPriority.Low,
-  262270: DispelPriority.Low,
-  268797: DispelPriority.Low,
-  269302: DispelPriority.Low,
-  272588: DispelPriority.Low,
-  275014: DispelPriority.Low,
-  275836: DispelPriority.Low,
-  285460: DispelPriority.Low,
-  294195: DispelPriority.Low,
-  294929: DispelPriority.Low,
-  319603: DispelPriority.Low,
-  319941: DispelPriority.Low,
-  320596: DispelPriority.Low,
-  321039: DispelPriority.Low,
-  321821: DispelPriority.Low,
-  322486: DispelPriority.Low,
-  322557: DispelPriority.Low,
-  322968: DispelPriority.Low,
-  323437: DispelPriority.Low,
-  323825: DispelPriority.Low,
-  324485: DispelPriority.Low,
-  324859: DispelPriority.Low,
-  325224: DispelPriority.Low,
-  325876: DispelPriority.Low,
-  326092: DispelPriority.Low,
-  328664: DispelPriority.Low,
-  328791: DispelPriority.Low,
-  330614: DispelPriority.Low,
-  330697: DispelPriority.Low,
-  330700: DispelPriority.Low,
-  330703: DispelPriority.Low,
-  330725: DispelPriority.Low,
-  333299: DispelPriority.Low,
-  338353: DispelPriority.Low,
-  339237: DispelPriority.Low,
-  340283: DispelPriority.Low,
-  340288: DispelPriority.Low,
-  340300: DispelPriority.Low,
-  341902: DispelPriority.Low,
-  341949: DispelPriority.Low,
-  341969: DispelPriority.Low,
-  345598: DispelPriority.Low,
-  346006: DispelPriority.Low,
-  346844: DispelPriority.Low,
-  347149: DispelPriority.Low,
-  347481: DispelPriority.Low,
-  347716: DispelPriority.Low,
-  349627: DispelPriority.Low,
-  349954: DispelPriority.Low,
-  349987: DispelPriority.Low,
-  350101: DispelPriority.Low,
-  350799: DispelPriority.Low,
-  350885: DispelPriority.Low,
-  351096: DispelPriority.Low,
-  351119: DispelPriority.Low,
-  352345: DispelPriority.Low,
-  355473: DispelPriority.Low,
-  355479: DispelPriority.Low,
-  355641: DispelPriority.Low,
-  355830: DispelPriority.Low,
-  355915: DispelPriority.Low,
-  356001: DispelPriority.Low,
-  356324: DispelPriority.Low,
-  356407: DispelPriority.Low,
-  356548: DispelPriority.Low,
-  356929: DispelPriority.Low,
-  356943: DispelPriority.Low,
-  357029: DispelPriority.Low,
-  357188: DispelPriority.Low,
-  357512: DispelPriority.Low,
-  357827: DispelPriority.Low,
-  358919: DispelPriority.Low,
-  424414: DispelPriority.Low,
-  424420: DispelPriority.Low,
-  424426: DispelPriority.Low,
-  424621: DispelPriority.Low,
-  424889: DispelPriority.Low,
-  425974: DispelPriority.Low,
-  426145: DispelPriority.Low,
-  426295: DispelPriority.Low,
-  426308: DispelPriority.Low,
-  426734: DispelPriority.Low,
-  426735: DispelPriority.Low,
-  427621: DispelPriority.Low,
-  427897: DispelPriority.Low,
-  427929: DispelPriority.Low,
-  428019: DispelPriority.Low,
-  428161: DispelPriority.Low,
-  428169: DispelPriority.Low,
-  429487: DispelPriority.Low,
-  429493: DispelPriority.Low,
-  429545: DispelPriority.Low,
-  430179: DispelPriority.Low,
-  431309: DispelPriority.Low,
-  431491: DispelPriority.Low,
-  431494: DispelPriority.Low,
-  432117: DispelPriority.Low,
-  432448: DispelPriority.Low,
-  433740: DispelPriority.Low,
-  433785: DispelPriority.Low,
-  433841: DispelPriority.Low,
-  434083: DispelPriority.Low,
-  434655: DispelPriority.Low,
-  434722: DispelPriority.Low,
-  434802: DispelPriority.Low,
-  435165: DispelPriority.Low,
-  436322: DispelPriority.Low,
-  436637: DispelPriority.Low,
-  437956: DispelPriority.Low,
-  438471: DispelPriority.Low,
-  438599: DispelPriority.Low,
-  438618: DispelPriority.Low,
-  439202: DispelPriority.Low,
-  439324: DispelPriority.Low,
-  439325: DispelPriority.Low,
-  439784: DispelPriority.Low,
-  439790: DispelPriority.Low,
-  439792: DispelPriority.Low,
-  440238: DispelPriority.Low,
-  440313: DispelPriority.Low,
-  441397: DispelPriority.Low,
-  441434: DispelPriority.Low,
-  443401: DispelPriority.Low,
-  443427: DispelPriority.Low,
-  443430: DispelPriority.Low,
-  443437: DispelPriority.Low,
-  446368: DispelPriority.Low,
-  446718: DispelPriority.Low,
-  446776: DispelPriority.Low,
-  448215: DispelPriority.Low,
-  448248: DispelPriority.Low,
-  448492: DispelPriority.Low,
-  448515: DispelPriority.Low,
-  448561: DispelPriority.Low,
-  448787: DispelPriority.Low,
-  448888: DispelPriority.Low,
-  449455: DispelPriority.Low,
-  450095: DispelPriority.Low,
-  451098: DispelPriority.Low,
-  451107: DispelPriority.Low,
-  451119: DispelPriority.Low,
-  451224: DispelPriority.Low,
-  451606: DispelPriority.Low,
-  451871: DispelPriority.Low,
-  453345: DispelPriority.Low,
-  453461: DispelPriority.Low,
-  454440: DispelPriority.Low,
-  456773: DispelPriority.Low,
-  460867: DispelPriority.Low,
-  461630: DispelPriority.Low,
-  462735: DispelPriority.Low,
-  462737: DispelPriority.Low,
-  463218: DispelPriority.Low,
-  464876: DispelPriority.Low,
-  465813: DispelPriority.Low,
-  465820: DispelPriority.Low,
-  465827: DispelPriority.Low,
-  466190: DispelPriority.Low,
-  468631: DispelPriority.Low,
-  468672: DispelPriority.Low,
-  468680: DispelPriority.Low,
-  468813: DispelPriority.Low,
-  469478: DispelPriority.Low,
-  469610: DispelPriority.Low,
-  469620: DispelPriority.Low,
-  469721: DispelPriority.Low,
-  469799: DispelPriority.Low,
-  470005: DispelPriority.Low,
-  470038: DispelPriority.Low,
-  473351: DispelPriority.Low,
+  1213805: DispelPriority.Low, // Nailgun
+  1214523: DispelPriority.Low, // Feasting Void
+  1215600: DispelPriority.Low, // Withering Touch
+  1217821: DispelPriority.Low, // Fiery Jaws
+  1219535: DispelPriority.Low, // Rift Claws
+  1220390: DispelPriority.Low, // Warp Strike
+  1221190: DispelPriority.Low, // Gluttonous Miasma
+  1221483: DispelPriority.Low, // Arcing Energy
+  1222341: DispelPriority.Low, // Gloom Bite
+  1225175: DispelPriority.Low, // Ceremonial Dagger
+  1226444: DispelPriority.Low, // Wounded Fate
+  1227745: DispelPriority.Low, // Toxic Regurgitation
+  1229474: DispelPriority.Low, // Gorge
+  1231497: DispelPriority.Low, // Overgorged
+  1235060: DispelPriority.Low, // Anima Tainted Armor
+  1235245: DispelPriority.Low, // Ankle Bite
+  1235368: DispelPriority.Low, // Arcane Slash
+  1235762: DispelPriority.Low, // Turn to Stone
+  1235766: DispelPriority.Low, // Mortal Strike
+  1236126: DispelPriority.Low, // Binding Javelin
+  1236513: DispelPriority.Low, // Unstable Anima
+  1236614: DispelPriority.Low, // Display of Power
+  1237220: DispelPriority.Low, // Stinging Sandstorm
+  1237602: DispelPriority.Low, // Gushing Wound
+  1240097: DispelPriority.Low, // Time Bomb
+  1240912: DispelPriority.Low, // Pierce
+  1241785: DispelPriority.Low, // Tainted Blood
+  1242678: DispelPriority.Low, // Shadowblades
+  1248209: DispelPriority.Low, // Phase Slash
+  262268: DispelPriority.Low, // Caustic Compound
+  262270: DispelPriority.Low, // Caustic Compound
+  268797: DispelPriority.Low, // Transmute: Enemy to Goo
+  269302: DispelPriority.Low, // Toxic Blades
+  285460: DispelPriority.Low, // Discom-BOMB-ulator
+  294195: DispelPriority.Low, // Arcing Zap
+  294929: DispelPriority.Low, // Blazing Chomp
+  319603: DispelPriority.Low, // Flesh to Stone
+  319941: DispelPriority.Low, // Stone Shattering Leap
+  321039: DispelPriority.Low, // Disgusting Burst
+  322486: DispelPriority.Low, // Overgrowth
+  323437: DispelPriority.Low, // Stigma of Pride
+  323825: DispelPriority.Low, // Grasping Rift
+  324485: DispelPriority.Low, // Harpoon
+  325876: DispelPriority.Low, // Mark of Obliteration
+  328791: DispelPriority.Low, // Ritual of Woe
+  330614: DispelPriority.Low, // Vile Eruption
+  330697: DispelPriority.Low, // Decaying Strike
+  330700: DispelPriority.Low, // Decaying Blight
+  330703: DispelPriority.Low, // Decaying Filth
+  330725: DispelPriority.Low, // Shadow Vulnerability
+  333299: DispelPriority.Low, // Curse of Desolation
+  339237: DispelPriority.Low, // Sinlight Visions
+  340300: DispelPriority.Low, // Tongue Lashing
+  341902: DispelPriority.Low, // Unholy Fervor
+  341949: DispelPriority.Low, // Withering Blight
+  341969: DispelPriority.Low, // Withering Discharge
+  345598: DispelPriority.Low, // Interrogation
+  346006: DispelPriority.Low, // Impound Contraband
+  346844: DispelPriority.Low, // Alchemical Residue
+  347149: DispelPriority.Low, // Infinite Breath
+  347481: DispelPriority.Low, // Shuri
+  347716: DispelPriority.Low, // Letter Opener
+  349627: DispelPriority.Low, // Gluttony
+  349954: DispelPriority.Low, // Purification Protocol
+  349987: DispelPriority.Low, // Venting Protocol
+  350101: DispelPriority.Low, // Chains of Damnation
+  350799: DispelPriority.Low, // Collapsing Star
+  350885: DispelPriority.Low, // Hyperlight Jolt
+  351096: DispelPriority.Low, // Energy Fragmentation
+  351119: DispelPriority.Low, // Shuriken Blitz
+  352345: DispelPriority.Low, // Anchor Shot
+  355473: DispelPriority.Low, // Shock Mines
+  355479: DispelPriority.Low, // Lethal Force
+  355641: DispelPriority.Low, // Scintillate
+  355830: DispelPriority.Low, // Quickblade
+  355915: DispelPriority.Low, // Glyph of Restraint
+  356001: DispelPriority.Low, // Beam Splicer
+  356324: DispelPriority.Low, // Empowered Glyph of Restraint
+  356407: DispelPriority.Low, // Ancient Dread
+  356548: DispelPriority.Low, // Radiant Pulse
+  356929: DispelPriority.Low, // Chain of Custody
+  356943: DispelPriority.Low, // Lockdown
+  357029: DispelPriority.Low, // Hyperlight Bomb
+  357188: DispelPriority.Low, // Double Technique
+  357512: DispelPriority.Low, // Frenzied Charge
+  357827: DispelPriority.Low, // Frantic Rip
+  358919: DispelPriority.Low, // Static Mace
+  424414: DispelPriority.Low, // Pierce Armor
+  424420: DispelPriority.Low, // Cinderblast
+  424426: DispelPriority.Low, // Lunging Strike
+  424621: DispelPriority.Low, // Brutal Smash
+  426145: DispelPriority.Low, // Paranoid Mind
+  426295: DispelPriority.Low, // Flaming Tether
+  426734: DispelPriority.Low, // Burning Shadows
+  427621: DispelPriority.Low, // Impale
+  427897: DispelPriority.Low, // Heat Wave
+  427929: DispelPriority.Low, // Nasty Nibble
+  428019: DispelPriority.Low, // Flashpoint
+  428161: DispelPriority.Low, // Molten Metal
+  428169: DispelPriority.Low, // Blinding Light
+  429487: DispelPriority.Low, // Unleash Corruption
+  429493: DispelPriority.Low, // Unstable Corruption
+  430179: DispelPriority.Low, // Seeping Corruption
+  431491: DispelPriority.Low, // Tainted Slash
+  432117: DispelPriority.Low, // Cosmic Singularity
+  433740: DispelPriority.Low, // Infestation
+  433785: DispelPriority.Low, // Grasping Slash
+  434083: DispelPriority.Low, // Ambush
+  434655: DispelPriority.Low, // Arathi Bombs
+  434722: DispelPriority.Low, // Subjugate
+  434802: DispelPriority.Low, // Horrifying Shrill
+  435165: DispelPriority.Low, // Blazing Strike
+  436322: DispelPriority.Low, // Poison Bolt
+  436637: DispelPriority.Low, // Burning Ricochet
+  437956: DispelPriority.Low, // Erupting Inferno
+  438471: DispelPriority.Low, // Voracious Bite
+  438599: DispelPriority.Low, // Bleeding Jab
+  439202: DispelPriority.Low, // Burning Fermentation
+  439324: DispelPriority.Low, // Umbral Weave
+  439325: DispelPriority.Low, // Burning Fermentation
+  439784: DispelPriority.Low, // Spinneret's Strands
+  439790: DispelPriority.Low, // Rolling Acid
+  439792: DispelPriority.Low, // Tacky Burst
+  441397: DispelPriority.Low, // Bee Venom
+  441434: DispelPriority.Low, // Failed Batch
+  443427: DispelPriority.Low, // Web Bolt
+  443430: DispelPriority.Low, // Silk Binding
+  446368: DispelPriority.Low, // Sacrificial Pyre
+  446718: DispelPriority.Low, // Umbral Weave
+  446776: DispelPriority.Low, // Pounce
+  448215: DispelPriority.Low, // Expel Webs
+  448492: DispelPriority.Low, // Thunderclap
+  448515: DispelPriority.Low, // Divine Judgment
+  448787: DispelPriority.Low, // Purification
+  448888: DispelPriority.Low, // Erosive Spray
+  451098: DispelPriority.Low, // Tacky Nova
+  451107: DispelPriority.Low, // Bursting Cocoon
+  451119: DispelPriority.Low, // Abyssal Blast
+  451606: DispelPriority.Low, // Holy Flame
+  451871: DispelPriority.Low, // Mass Tremor
+  453345: DispelPriority.Low, // Abyssal Rot
+  453461: DispelPriority.Low, // Caltrops
+  456773: DispelPriority.Low, // Twilight Wind
+  460867: DispelPriority.Low, // Big Bada BOOM!
+  462735: DispelPriority.Low, // Blood-Infused Strikes
+  462737: DispelPriority.Low, // Black Blood Wound
+  463218: DispelPriority.Low, // Volatile Keg
+  465813: DispelPriority.Low, // Lethargic Venom
+  465820: DispelPriority.Low, // Vicious Chomp
+  465827: DispelPriority.Low, // Warp Blood
+  466190: DispelPriority.Low, // Thunder Punch
+  468631: DispelPriority.Low, // Harpoon
+  468672: DispelPriority.Low, // Pinch
+  468680: DispelPriority.Low, // Crabsplosion
+  468813: DispelPriority.Low, // Gigazap
+  469478: DispelPriority.Low, // Sludge Claws
+  469610: DispelPriority.Low, // Shadow Fang
+  469620: DispelPriority.Low, // Creeping Shadow
+  469721: DispelPriority.Low, // Backwash
+  469799: DispelPriority.Low, // Overcharge
+  470005: DispelPriority.Low, // Vicious Bite
+  470038: DispelPriority.Low, // Razorchoke Vines
+  473351: DispelPriority.Low, // Electrocrush
   // [473713] = true, Kinetic Explosive Gel
 
   // Halls of Reflection

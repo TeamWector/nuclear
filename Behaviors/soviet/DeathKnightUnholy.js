@@ -49,7 +49,6 @@ export class DeathKnightUnholy extends Behavior {
       new bt.Decorator(
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
-          common.waitForNotWaitingForArenaToStart(),
           common.waitForNotSitting(),
           common.waitForNotMounted(),
           common.waitForCastOrChannel(),
@@ -69,7 +68,6 @@ export class DeathKnightUnholy extends Behavior {
   cooldownPriority() {
     return new bt.Selector(
       this.useRacials(),
-      this.useTrinkets(),
       // Cast Legion of Souls
       spell.cast("Army of the Dead", ret => true),
       // Cast Rune Strike if we have fewer than 4 festering wounds after Legion of Souls during burst
@@ -79,6 +77,7 @@ export class DeathKnightUnholy extends Behavior {
       // Cast Apocalypse the target with the lowest Festering Wounds (AoE)
       spell.cast("Apocalypse", on => this.findTargetWithLeastWounds(), ret => this.findTargetWithLeastWounds() !== undefined),
       // Cast Unholy Assault
+      this.useTrinkets(),
       spell.cast("Unholy Assault", ret => true),
     );
   }
@@ -98,28 +97,34 @@ export class DeathKnightUnholy extends Behavior {
         ret => this.hasCooldownsReady(),
         this.cooldownPriority()
       ),
-      // Cast Outbreak if no Virulent Plague or if Apocalypse has >7s left on its CD and Virulent Plague is not up
-      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreak() || this.shouldCastOutbreakForApocalypse()),
-      // Cast Scourge Strike if Trollbane's Chains of Ice is up
-      spell.cast("Scourge Strike", on => this.findTargetWithTrollbaneChainsOfIce(), ret => this.findTargetWithTrollbaneChainsOfIce() !== undefined),
-      // Cast Festering Scythe if it procs
+      // 1. Cast Outbreak if Virulent Plague is missing and Apocalypse or Army of the Dead have more than 5 seconds remaining on their cooldown
+      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreakForPriority()),
+      // Maintain at least 1 Festering Wound - Cast Rune Strike if <1 Festering Wounds
+      spell.cast("Rune Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) < 1),
+      // 2. Cast Festering Scythe if it is available
       spell.cast("Festering Scythe", on => me.target, ret => me.hasAura(auras.festeringScythe)),
-      // Cast Soul Reaper if the target is going to be <35% hp in <5 seconds
+      // 3. Cast Soul Reaper if the enemy is below 35% health or will be when this expires
       spell.cast("Soul Reaper", on => me.target, ret => me.target && me.targetUnit.pctHealth <= 35),
-      // Cast Death Coil if you have >60 Runic Power, or Sudden Doom is up
-      spell.cast("Death Coil", on => me.target, ret => me.power > 60 || me.hasAura(auras.suddenDoom)),
-      // Cast Rune Strike if target has 2 or fewer festering wounds
-      spell.cast("Rune Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) <= 2),
-      // Cast Scourge Strike if you have any Festering Wounds
-      spell.cast("Scourge Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) > 0),
-      // Cast Death Coil if Death Rot is about to expire
+      // 4. Cast Death Coil when you have more than 80 Runic Power or when Sudden Doom is active
+      spell.cast("Death Coil", on => me.target, ret => me.power > 80 || me.hasAura(auras.suddenDoom)),
+      // 5. Cast Scourge Strike (Clawing Shadows) when you have 1 or more Festering Wounds and Rotten Touch is on the target
+      spell.cast("Scourge Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) >= 1 && me.targetUnit.hasAuraByMe(auras.rottenTouch)),
+      // 6. Cast Rune Strike (Festering Strike) when you have 2 or less Festering Wounds (but only at 0 wounds during Army of the Dead)
+      spell.cast("Rune Strike", on => me.target, ret => this.shouldCastFesteringStrike()),
+      // Maintain Plaguebringer with Scourge Strike
+      spell.cast("Scourge Strike", on => me.target, ret => me.target && this.isPlaguebringerAboutToExpire()),
+      // 8. Cast Death Coil if Death Rot is about to fall off
       spell.cast("Death Coil", on => me.target, ret => this.isDeathRotAboutToExpire()),
-      // Cast Death Coil
+      // Prevent Runic Power overcap with Death Coil
+      spell.cast("Death Coil", on => me.target, ret => me.power > 90),
+      // 9. Cast Scourge Strike (Clawing Shadows) when you have 3 or more Festering Wounds
+      spell.cast("Scourge Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) >= 3),
+      // 10. Cast Death Coil
       spell.cast("Death Coil", on => me.target, ret => me.power >= 40),
     );
   }
 
-  // AoE Damage - Combined Build and Burst Priority
+  // AoE Damage - Based on provided priority list
   aoeDamage() {
     return new bt.Selector(
       // Follow the cooldown priority if any cooldowns are ready
@@ -127,37 +132,30 @@ export class DeathKnightUnholy extends Behavior {
         ret => this.hasCooldownsReady(),
         this.cooldownPriority()
       ),
-      // Cast Festering Scythe if it procs
+      // Maintain Virulent Plague on our target (basic maintenance)
+      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreak()),
+      // Maintain at least 1 Festering Wound - Cast Rune Strike if <1 Festering Wounds
+      spell.cast("Rune Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) < 1),
+      // 1. Cast Festering Scythe if it is available (spread Festering Wounds)
       spell.cast("Festering Scythe", on => me.target, ret => me.hasAura(auras.festeringScythe)),
-      // Cast Scourge Strike if Trollbane's Chains of Ice is up
-      spell.cast("Scourge Strike", on => this.findTargetWithTrollbaneChainsOfIce(), ret => this.findTargetWithTrollbaneChainsOfIce() !== undefined),
-      // Use trinkets during burst windows
-      new bt.Decorator(
-        ret => this.shouldUseBurstPriority(),
-        this.useTrinkets()
-      ),
-      // Cast Outbreak if no Virulent Plague or if Apocalypse has >7s left on its CD and Virulent Plague is not on every target
-      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreak() || this.shouldCastOutbreakForApocalypse()),
-      // Cast Epidemic if Sudden Doom is up and multiple targets
-      spell.cast("Epidemic", ret => this.shouldUseEpidemic() && me.hasAura(auras.suddenDoom)),
-      // Cast Death Coil if Sudden Doom is up
-      spell.cast("Death Coil", on => me.target, ret => me.hasAura(auras.suddenDoom)),
-      // Cast Rune Strike if target has 2 or fewer festering wounds
-      spell.cast("Rune Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) <= 2),
-      // Cast Death and Decay if it is not already active
-      spell.cast("Death and Decay", ret => !me.hasAura(auras.deathAndDecay)),
-      // Cast Scourge Strike if any targets have Festering Wounds
+      // Cast Death and Decay if not already active (don't overlap with Legion of Souls buff)
+      spell.cast("Death and Decay", ret => this.shouldCastDeathAndDecay()),
+      // 3. Cast Scourge Strike (Clawing Shadows) if Plaguebringer is not active (maintain Plaguebringer)
+      spell.cast("Scourge Strike", on => me.target, ret => !me.hasAura(auras.plagueBringer)),
+      // 4. Cast Outbreak if Virulent Plague is missing and Apocalypse and either Virulent Plague or Frost Fever are missing on any target
+      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreakAoE()),
+      // Prevent Runic Power overcap with Epidemic
+      spell.cast("Epidemic", ret => me.power > 90 && this.shouldUseEpidemic()),
+      // 6. Cast Epidemic if Sudden Doom is active
+      spell.cast("Epidemic", ret => me.hasAura(auras.suddenDoom)),
+      // 7. Cast Scourge Strike (Clawing Shadows) if any target has a Festering Wound
       spell.cast("Scourge Strike", on => this.findTargetWithFesteringWounds(), ret => this.findTargetWithFesteringWounds() !== undefined),
-      // Cast Epidemic if you have >60 Runic Power and multiple targets
-      spell.cast("Epidemic", ret => this.shouldUseEpidemic() && me.power > 60),
-      // Cast Death Coil if you have 4 or fewer Runes
-      spell.cast("Death Coil", on => me.target, ret => me.powerByType(PowerType.Runes) <= 4),
-      // Cast Epidemic for multiple targets
-      spell.cast("Epidemic", ret => this.shouldUseEpidemic() && me.power >= 40),
-      // Cast Death Coil
-      spell.cast("Death Coil", on => me.target, ret => me.power >= 40),
-      // Cast Rune Strike on target with the least Festering Wounds
-      spell.cast("Rune Strike", on => this.findTargetWithLeastWounds(), ret => this.findTargetWithLeastWounds() !== undefined),
+      // 8. Cast Epidemic if no targets have Festering Wounds
+      spell.cast("Epidemic", ret => this.shouldUseEpidemicNoWounds()),
+      // 9. Cast Scourge Strike (Clawing Shadows)
+      spell.cast("Scourge Strike", on => me.target, ret => me.target),
+      // 10. Cast Epidemic
+      spell.cast("Epidemic", ret => this.shouldUseEpidemic()),
     );
   }
 
@@ -220,6 +218,36 @@ export class DeathKnightUnholy extends Behavior {
     }
     // Cast Outbreak if Apocalypse has >7s left on its CD and Virulent Plague is not up
     return spell.isOnCooldown("Apocalypse") && !me.targetUnit.hasAuraByMe(auras.virulentPlague);
+  }
+
+  shouldCastOutbreakForPriority() {
+    if (!me.target) {
+      return false;
+    }
+    // Cast Outbreak if Virulent Plague is missing and Apocalypse or Army of the Dead have more than 7 seconds remaining on their cooldown
+    const apocalypseCooldown = spell.getCooldown("Apocalypse");
+    const armyOfTheDeadCooldown = spell.getCooldown("Army of the Dead");
+    const hasVirulentPlague = me.targetUnit.hasAuraByMe(auras.virulentPlague);
+
+    return !hasVirulentPlague &&
+           (apocalypseCooldown > 5000 || armyOfTheDeadCooldown > 5000);
+  }
+
+  shouldCastFesteringStrike() {
+    if (!me.target) {
+      return false;
+    }
+
+    const festeringWounds = me.targetUnit.getAuraStacks(auras.festeringWound);
+    const hasArmyOfTheDead = me.hasAura(auras.legionOfSouls); // Army of the Dead gives Legion of Souls buff
+
+    // While Army of the Dead (Legion of Souls) is active, only cast when you are at 0 Festering Wounds
+    if (hasArmyOfTheDead) {
+      return festeringWounds === 0;
+    }
+
+    // Otherwise, cast when you have 2 or less Festering Wounds
+    return festeringWounds <= 2;
   }
 
   hasCooldownsReady() {
@@ -307,5 +335,36 @@ export class DeathKnightUnholy extends Behavior {
     // Use Epidemic at 4+ targets with Improved Death Coil, 3+ targets without it
     const targetThreshold = hasImprovedDeathCoil ? 4 : 3;
     return enemyCount >= targetThreshold;
+  }
+
+  shouldCastOutbreakAoE() {
+    if (!me.target) {
+      return false;
+    }
+
+    // Cast Outbreak if Virulent Plague is missing and Apocalypse and either Virulent Plague or Frost Fever are missing on any target
+    const hasVirulentPlague = me.targetUnit.hasAuraByMe(auras.virulentPlague);
+    const hasFrostFever = me.targetUnit.hasAuraByMe(auras.frostFever);
+    const apocalypseOnCooldown = spell.isOnCooldown("Apocalypse");
+
+    return !hasVirulentPlague && apocalypseOnCooldown && (!hasVirulentPlague || !hasFrostFever);
+  }
+
+  shouldUseEpidemicNoWounds() {
+    if (!me.target || !me.targetUnit.hasAuraByMe(auras.virulentPlague)) {
+      return false;
+    }
+
+    // Check if no targets have Festering Wounds
+    const enemies = me.getEnemies(15);
+    const hasWoundedTargets = enemies.some(enemy => enemy.getAuraStacks(auras.festeringWound) > 0);
+
+    return !hasWoundedTargets && enemies.length >= 2;
+  }
+
+  shouldCastDeathAndDecay() {
+    // Don't cast Death and Decay if we already have the buff (from Legion of Souls or previous cast)
+    // Legion of Souls gives Death and Decay buff for full 14 seconds, so don't overlap
+    return !me.hasAura(auras.deathAndDecay);
   }
 }
