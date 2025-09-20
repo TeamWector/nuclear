@@ -153,7 +153,7 @@ export class DeathKnightUnholy extends Behavior {
       // 8. Cast Epidemic if no targets have Festering Wounds
       spell.cast("Epidemic", ret => this.shouldUseEpidemicNoWounds()),
       // 9. Cast Scourge Strike (Clawing Shadows)
-      spell.cast("Scourge Strike", on => me.target, ret => me.target),
+      spell.cast("Scourge Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) >= 1),
       // 10. Cast Epidemic
       spell.cast("Epidemic", ret => this.shouldUseEpidemic()),
     );
