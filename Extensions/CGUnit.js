@@ -323,7 +323,7 @@ Object.defineProperties(wow.CGUnit.prototype, {
      */
     value: function (nameOrId) {
       // Get the aura using the existing getAura method
-      const aura = this.getVisibleAuraByMe(nameOrId);
+      const aura = this.getAuraByMe(nameOrId);
 
       // If the aura is found, return the stack count, otherwise return 0
       return aura ? aura.stacks || 0 : 0;
