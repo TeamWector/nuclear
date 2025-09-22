@@ -97,8 +97,8 @@ export class DeathKnightUnholy extends Behavior {
         ret => this.hasCooldownsReady(),
         this.cooldownPriority()
       ),
-      // 1. Cast Outbreak if Virulent Plague is missing and Apocalypse or Army of the Dead have more than 5 seconds remaining on their cooldown
-      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreakForPriority()),
+      // Maintain Virulent Plague on our target (basic maintenance)
+      spell.cast("Outbreak", on => me.target, ret => this.shouldCastOutbreak()),
       // Maintain at least 1 Festering Wound - Cast Rune Strike if <1 Festering Wounds
       spell.cast("Rune Strike", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) < 1),
       // 2. Cast Festering Scythe if it is available
