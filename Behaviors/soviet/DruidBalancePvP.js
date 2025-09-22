@@ -312,6 +312,14 @@ export class DruidBalancePvP extends Behavior {
   cycloneTarget() {
     if (!Settings.UseCyclone) return undefined;
 
+    // Check if any enemy player currently has our Cyclone - if so, don't cast another to avoid wasting DRs
+    const allEnemies = me.getPlayerEnemies(40); // Check wider range for existing cyclones
+    for (const enemy of allEnemies) {
+      if (enemy.hasAuraByMe(auras.cyclone)) {
+        return undefined; // Someone already has our Cyclone, don't cast another
+      }
+    }
+
     // Check for High Winds aura to determine cyclone range
     const cycloneRange = me.hasAura(auras.highWinds) ? 30 : 25; // 25 + 5 if High Winds, else 25
     const nearbyEnemies = me.getPlayerEnemies(cycloneRange);

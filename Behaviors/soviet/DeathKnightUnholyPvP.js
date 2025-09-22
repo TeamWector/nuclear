@@ -80,7 +80,7 @@ export class DeathKnightUnholy extends Behavior {
 
       // Core burst rotation
       // Use Apocalypse - spend 4 wounds and transform pet
-      spell.cast("Apocalypse", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) >= 4),
+      spell.cast("Apocalypse", on => me.target, ret => me.target && me.targetUnit.getAuraStacks(auras.festeringWound) >= 2),
 
       // Priority: Use Rune Strike to build wounds when Apocalypse is off cooldown but we don't have enough wounds
       spell.cast("Rune Strike", on => me.target, ret => me.target &&
