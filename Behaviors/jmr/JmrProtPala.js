@@ -50,7 +50,7 @@ export class JMRPROTECTIONPALA extends Behavior {
           common.waitForNotMounted(),
           common.waitForNotSitting(),
           common.waitForCastOrChannel(),
-          spell.cast("Devotion Aura", on => me, req => !me.hasAura(auras.devotionAura)),
+          spell.cast("Devotion Aura", on => me, req => !me.hasVisibleAura(auras.devotionAura)),
           spell.cast("Intercession",
             on => {
               const mouseoverGuid = wow.GameUI.mouseOverGuid;
@@ -96,8 +96,8 @@ export class JMRPROTECTIONPALA extends Behavior {
     return new bt.Selector(
       spell.cast("Lay on Hands", on => me, req => me.effectiveHealthPercent < 10),
       spell.cast("Divine Shield", on => me, req => me.effectiveHealthPercent < 10),
-      spell.cast("Ardent Defender", on => me, req => me.effectiveHealthPercent < 25),
-      spell.cast("Guardian of Ancient Kings", on => me, req => me.effectiveHealthPercent < 40),
+      spell.cast("Ardent Defender", on => me, req => me.effectiveHealthPercent < 40),
+      spell.cast("Guardian of Ancient Kings", on => me, req => me.effectiveHealthPercent < 50),
       spell.cast("Word of Glory", on => me, req => me.effectiveHealthPercent < 50),
     );
   }
