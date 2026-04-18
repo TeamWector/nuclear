@@ -236,6 +236,7 @@ export const drSpellList = {
   355: "taunt", // Taunt
 
   // *** Controlled Knockback Effects ***
+  204408: "knockback", // Thunderstorm
   108199: "knockback", // Gorefiend's Grasp
   202249: "knockback", // Overrun
   61391: "knockback", // Typhoon

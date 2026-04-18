@@ -280,10 +280,12 @@ export class DemonhunterHavocPvP extends Behavior {
     return undefined;
   }
 
+  // Layer Misery after stun/root — skip disorient/incap (cyclone, imprison, poly, etc.) where follow-up fails.
   sigilOfMiseryTarget() {
     const nearbyEnemies = me.getPlayerEnemies(30);
     for (const unit of nearbyEnemies) {
       if (unit.isHealer() && (unit.isStunned() || unit.isRooted()) &&
+        !unit.isCCdByCategory("disorient") && !unit.isCCdByCategory("incapacitate") &&
         unit.canCC() && unit.getDR("disorient") === 0) {
         return unit;
       }

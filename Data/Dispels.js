@@ -341,6 +341,7 @@ export const dispels = {
   383648: DispelPriority.High, // Shaman - Earth Shield
   21562: DispelPriority.Low, // Priest - Powerword Fortitude
   17: DispelPriority.Medium, // Priest - Powerword Shield
+  1253591: DispelPriority.Medium, // Priest - Void Shield
   11426: DispelPriority.High, // Mage - Ice Barrier
   358385: DispelPriority.Medium, // Evoker - Land Slide
   360806: DispelPriority.High, // Evoker - Sleep Walk
