@@ -26,14 +26,15 @@ const auras = {
   shadowMend: 1252217,
   powerInfusion: 10060,
   archangel: 81700,
+  evangelism: 472443,
 };
 
 /** Oracle PvP: minimum allies with Atonement before Evangelism is worth pressing. */
 const MIN_ATONEMENTS_FOR_EVANGELISM = 2;
 /** Only do proactive Atonement spreading when team is stable. */
-const SAFE_ATONEMENT_SPREAD_HP = 70;
+const SAFE_ATONEMENT_SPREAD_HP = 60;
 /** Do not spend a GCD on offensive SW:P while allies are below this HP. */
-const OFFENSIVE_SWP_HEALING_LOCK_HP = 90;
+const OFFENSIVE_SWP_HEALING_LOCK_HP = 76;
 /** Skip Fear briefly after fresh SW:P on an enemy priest. */
 const SWP_TO_FEAR_LOCKOUT_MS = 2500;
 
@@ -124,22 +125,34 @@ export class PriestDisciplinePvP extends Behavior {
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
           // High priority Shadow Word: Death for incoming CC (single cached target per frame — see _refreshIncomingCcCache)
-          spell.cast("Shadow Word: Death", on => this.findIncomingCCTarget(), ret => {
-            const t = this.findIncomingCCTarget();
-            return Settings.UseShadowWordDeathForCCD && t != null && !spell.isOnCooldown("Shadow Word: Death");
-          }),
-          spell.cast("Fade", () =>
-            this.canAttemptFadeCast() &&
-            this.hasIncomingCCForFade() &&
-            !spell.isOnCooldown("Fade")
+          // Also protect SW:D from being interrupted during Ultimate Penitence cast
+          new bt.Decorator(
+            () => !this.isCastingUltimatePenitence(), // Don't interrupt UP cast
+            spell.cast("Shadow Word: Death", on => this.findIncomingCCTarget(), ret => {
+              const t = this.findIncomingCCTarget();
+              return Settings.UseShadowWordDeathForCCD && t != null && !spell.isOnCooldown("Shadow Word: Death");
+            })
+          ),
+          // Fade for incoming CC - but don't interrupt Ultimate Penitence cast/rise phase
+          new bt.Decorator(
+            () => !this.isCastingUltimatePenitence(),
+            spell.cast("Fade", () =>
+              this.canAttemptFadeCast() &&
+              this.hasIncomingCCForFade() &&
+              !spell.isOnCooldown("Fade")
+            )
           ),
 
           // Preemptive Fade for predicted enemy CC (priest within 8y, rogue within 4y)
-          spell.cast("Fade", () =>
-            this.canAttemptFadeCast() &&
-            Settings.UsePreemptiveFade &&
-            !spell.isOnCooldown("Fade") &&
-            this.shouldPreemptiveFade()
+          // Also don't interrupt Ultimate Penitence cast/rise phase
+          new bt.Decorator(
+            () => !this.isCastingUltimatePenitence(),
+            spell.cast("Fade", () =>
+              this.canAttemptFadeCast() &&
+              Settings.UsePreemptiveFade &&
+              !spell.isOnCooldown("Fade") &&
+              this.shouldPreemptiveFade()
+            )
           ),
 
           common.waitForCastOrChannel(),
@@ -164,8 +177,14 @@ export class PriestDisciplinePvP extends Behavior {
 
   waitForNotJustCastPenitence() {
     return new bt.Action(() => {
-      let lastCastPenitence = spell.getTimeSinceLastCast("Ultimate Penitence");
-      if (lastCastPenitence < 400) {
+      // Ultimate Penitence: cast time + rise animation before channel starts
+      // We cannot be interrupted during this entire window
+      const timeSinceCast = spell.getTimeSinceLastCast("Ultimate Penitence");
+      if (timeSinceCast < 2200) {
+        return bt.Status.Success;
+      }
+      // Also check if we're still in the cast phase (not yet channeling)
+      if (me.currentCast === 421453 || me.currentChannel === 421453) {
         return bt.Status.Success;
       }
       return bt.Status.Failure;
@@ -173,11 +192,13 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   isCastingUltimatePenitence() {
-    let currentSpellId = me.currentChannel;
-    if (currentSpellId === 0) {
-      currentSpellId = me.currentCast;
+    // Ultimate Penitence: check current channel/cast state first (most reliable)
+    if (me.currentChannel === 421453 || me.currentCast === 421453) {
+      return true;
     }
-    return currentSpellId === 421453;
+    // Fallback: check time since cast (covers cast + rise window)
+    const timeSinceCast = spell.getTimeSinceLastCast("Ultimate Penitence");
+    return timeSinceCast < 2200;
   }
 
   shouldStopCastingForCCCounter() {
@@ -654,52 +675,67 @@ export class PriestDisciplinePvP extends Behavior {
       }),
       spell.cast("Mass Dispel", on => this.findMassDispelTarget(), ret => this.findMassDispelTarget() !== undefined),
 
-      spell.cast("Evangelism", on => me, ret =>
-        spell.isSpellKnown("Evangelism")
-        && me.inCombat()
-        && !this.usedMajorHealCDRecently(this.healTarget)
-        && this.getAtonementCount() >= MIN_ATONEMENTS_FOR_EVANGELISM
-        && ((this.healTarget && this.healTarget.effectiveHealthPercent < 58)
-          || this.getAverageTeamHealth() < 72)
-      ),
       // Instant shield priority first (Oracle PvP triage).
       spell.cast("Void Shield", on => this.getVoidShieldTarget(), ret => this.getVoidShieldTarget() !== undefined),
       spell.cast("Power Word: Shield", on => this.getShieldPriorityTarget(), ret =>
         this.getShieldPriorityTarget() !== undefined),
-      spell.cast("Power Word: Radiance", on => this.healTarget, ret =>
-        this.healTarget && spell.getTimeSinceLastCast("Evangelism") < 6000
-          && !this.shouldHoldRadianceForShield()
-          && spell.getCharges("Power Word: Radiance") > 0
-      ),
-      this.noFacingSpellsImportant(),
-      spell.cast("Power Word: Barrier", on => this.healTarget, ret => this.shouldUseBarrier(this.healTarget), {
-        callback: () => {
-          this.updateDefensiveCooldownTime("Power Word: Barrier");
-          toastSuccess(`Power Word: Barrier placed`, 1.2, 3000);
-        }
-      }),
 
-      spell.cast("Flash Heal", on => this.healTarget, ret =>
-        this.healTarget?.effectiveHealthPercent < 78
+      // Instant casts with Surge of Light - use immediately!
+      spell.cast("Shadow Mend", on => this.healTarget, ret =>
+        this.healTarget?.effectiveHealthPercent < 80
+        && me.hasAura(auras.shadowMend)
         && me.hasAura(auras.surgeOfLight)
         && !this.shouldHoldFlashForShield(this.healTarget)),
+      spell.cast("Flash Heal", on => this.healTarget, ret =>
+        this.healTarget?.effectiveHealthPercent < 75
+        && me.hasAura(auras.surgeOfLight)
+        && !me.hasAura(auras.shadowMend)
+        && !this.shouldHoldFlashForShield(this.healTarget)),
+
+      // Evangelism: boosts healing - use when team needs help but not critical
+      // Don't use when someone is about to die (use direct heals instead)
+      spell.cast("Evangelism", on => me, ret =>
+        spell.isSpellKnown("Evangelism")
+        && me.inCombat()
+        && !this.usedMajorHealCDRecently(this.healTarget)
+        && this.getAtonementCount() >= 1
+        && !spell.isOnCooldown("Evangelism")
+        && (
+          (this.healTarget && this.healTarget.effectiveHealthPercent < 68)
+          || (this.getAverageTeamHealth() < 80)
+          || (this.getAtonementCount() >= 3 && this.getAverageTeamHealth() < 85)
+        )
+      ),
+
+      // Power Word: Radiance during Evangelism buff - treat like instant Flash Heal
+      spell.cast("Power Word: Radiance", on => this.healTarget, ret =>
+        this.healTarget
+        && me.hasAura(auras.evangelism)
+        && !this.shouldHoldRadianceForShield()
+        && spell.getCharges("Power Word: Radiance") > 0
+        && (
+          this.healTarget.effectiveHealthPercent < 90
+          || this.getInjuredAlliesNeedingRadiance(90, 6000) >= 1
+        )
+      ),
+
+      spell.cast("Penance", on => this.healTarget, ret => this.shouldDefensivePenance(this.healTarget)),
+
+      this.noFacingSpellsImportant(),
+
       spell.dispel("Purify", true, DispelPriority.High, true, WoWDispelType.Magic),
       new bt.Decorator(
         () => !this.shouldPauseOffensiveDispelsForHealing(),
         spell.dispel("Dispel Magic", false, DispelPriority.High, true, WoWDispelType.Magic)
       ),
 
-      // Keep Penance ahead of casted triage heals.
-      spell.cast("Penance", on => this.healTarget, ret => this.shouldDefensivePenance(this.healTarget)),
-      spell.cast("Shadow Mend", on => this.healTarget, ret =>
-        me.hasAura(auras.shadowMend) && this.healTarget?.effectiveHealthPercent < 90),
-
       spell.cast("Power Word: Radiance", on => this.healTarget, ret =>
         !this.shouldHoldRadianceForShield() && this.shouldCastRadiancePvp(2)),
       spell.cast("Power Word: Radiance", on => this.healTarget, ret =>
         !this.shouldHoldRadianceForShield() && this.shouldCastRadiancePvp(1)),
+
       spell.cast("Flash Heal", on => this.healTarget, ret =>
-        this.healTarget?.effectiveHealthPercent < 70
+        this.healTarget && (this.healTarget.effectiveHealthPercent < 62 || this.healTarget.timeToDeath() < 3)
         && !this.isLowMana()
         && !this.shouldHoldFlashForShield(this.healTarget)),
       spell.dispel("Purify", true, DispelPriority.Medium, true, WoWDispelType.Magic),
@@ -717,13 +753,47 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   applyAtonement() {
-    return new bt.Decorator(
-      () => this.canSafelyApplyAtonement(),
-      new bt.Selector(
-        spell.cast("Power Word: Shield", on => this.findFriendWithoutAtonement(), ret => this.findFriendWithoutAtonement() !== undefined),
-        spell.cast("Plea", on => this.findFriendWithoutAtonement(), ret => this.findFriendWithoutAtonement() !== undefined)
+    // Solo shuffle: get atonement up FAST on injured targets, then protect them
+    return new bt.Selector(
+      // Priority 1: Apply atonement to injured heal target immediately
+      new bt.Decorator(
+        () => this.healTarget && !this.hasAtonement(this.healTarget) && this.healTarget.effectiveHealthPercent < 92,
+        new bt.Selector(
+          spell.cast("Power Word: Shield", on => this.healTarget, ret => this.healTarget !== undefined),
+          spell.cast("Plea", on => this.healTarget, ret => this.healTarget !== undefined)
+        )
+      ),
+      // Priority 2: Rapid atonement spread to injured allies (<80% HP), sorted by lowest HP first
+      new bt.Decorator(
+        () => this.getInjuredFriendsNeedingAtonement(80).length > 0,
+        new bt.Selector(
+          spell.cast("Power Word: Shield", on => this.getInjuredFriendsNeedingAtonement(80)[0], ret => true),
+          spell.cast("Plea", on => this.getInjuredFriendsNeedingAtonement(80)[0], ret => true)
+        )
+      ),
+      // Priority 3: Proactive spread when we have room for more atonement
+      new bt.Decorator(
+        () => this.getAtonementCount() < 3,
+        new bt.Selector(
+          spell.cast("Power Word: Shield", on => this.findFriendWithoutAtonement(), ret => this.findFriendWithoutAtonement() !== undefined),
+          spell.cast("Plea", on => this.findFriendWithoutAtonement(), ret => this.findFriendWithoutAtonement() !== undefined)
+        )
       )
     );
+  }
+
+  getInjuredFriendsNeedingAtonement(healthThreshold) {
+    return me.getPlayerFriends(40).filter(friend =>
+      this.isNotDeadAndInLineOfSight(friend) &&
+      friend.effectiveHealthPercent < healthThreshold &&
+      !this.hasAtonement(friend)
+    ).sort((a, b) => a.effectiveHealthPercent - b.effectiveHealthPercent);
+  }
+
+  shouldApplyAtonementToTarget() {
+    if (!this.healTarget) return false;
+    if (this.hasAtonement(this.healTarget)) return false;
+    return true;
   }
 
   noFacingSpellsImportant() {
@@ -762,7 +832,7 @@ export class PriestDisciplinePvP extends Behavior {
         me.targetUnit && this.canOffensivePenance(me.targetUnit)),
       spell.cast("Mind Blast", on => me.targetUnit, ret => true),
       spell.cast("Smite", on => me.targetUnit, ret =>
-        me.targetUnit && me.pctPowerByType(PowerType.Mana) > 12),
+        me.targetUnit && me.pctPowerByType(PowerType.Mana) > 8),
     );
   }
 
@@ -798,8 +868,6 @@ export class PriestDisciplinePvP extends Behavior {
     return target?.hasAura(auras.shadowWordPain) || false;
   }
 
-
-
   getAtonementRemaining(target) {
     const a = target?.getAuraByMe(auras.atonement);
     return a ? a.remaining : 0;
@@ -824,16 +892,17 @@ export class PriestDisciplinePvP extends Behavior {
       return false;
     }
     const t = this.healTarget;
-    const spreadNeed = this.getInjuredAlliesNeedingRadiance(82, 5500);
+    // Solo shuffle: more aggressive radiance for atonement spreading
+    const spreadNeed = this.getInjuredAlliesNeedingRadiance(86, 6000);
     if (requiredCharges === 2) {
       return spreadNeed >= 2
-        || (t.effectiveHealthPercent < 72 && spreadNeed >= 1)
-        || this.getAverageTeamHealth() < 68;
+        || (t.effectiveHealthPercent < 80 && spreadNeed >= 1)
+        || this.getAverageTeamHealth() < 75;
     }
     // Single charge: emergency or solo injured partner
-    return t.effectiveHealthPercent < 58
-      || t.timeToDeath() < 6
-      || spreadNeed >= 1 && t.effectiveHealthPercent < 78;
+    return t.effectiveHealthPercent < 72
+      || t.timeToDeath() < 4
+      || spreadNeed >= 1 && t.effectiveHealthPercent < 84;
   }
 
   getVoidShieldTarget() {
@@ -886,8 +955,8 @@ export class PriestDisciplinePvP extends Behavior {
     if (!shieldTarget) {
       return false;
     }
-    // Emergency floor: allow Flash Heal even if shield target exists.
-    if (target && (target.effectiveHealthPercent < 40 || target.timeToDeath() < 3)) {
+    // Emergency floor: allow Flash Heal even if shield target exists
+    if (target && (target.effectiveHealthPercent < 35 || target.timeToDeath() < 2.5)) {
       return false;
     }
     return true;
@@ -899,8 +968,9 @@ export class PriestDisciplinePvP extends Behavior {
 
   shouldPauseTargetedDamageForHealing() {
     const ht = this.healTarget;
+    // Solo shuffle: people die in 2-3 seconds without defensives
     if (ht && this.isNotDeadAndInLineOfSight(ht) &&
-      (ht.effectiveHealthPercent < 72 || ht.timeToDeath() < 4.5)) {
+      (ht.timeToDeath() < 2.5 || ht.effectiveHealthPercent < 55)) {
       return true;
     }
 
@@ -908,7 +978,7 @@ export class PriestDisciplinePvP extends Behavior {
       if (!this.isNotDeadAndInLineOfSight(friend)) {
         continue;
       }
-      if (friend.effectiveHealthPercent < 62 || friend.timeToDeath() < 4) {
+      if (friend.timeToDeath() < 2.5 || friend.effectiveHealthPercent < 48) {
         return true;
       }
     }
@@ -920,21 +990,26 @@ export class PriestDisciplinePvP extends Behavior {
     if (!target) {
       return false;
     }
-    if (target.effectiveHealthPercent < 42 || target.timeToDeath() < 4) {
+    // Solo shuffle: raw HP first, then timeToDeath
+    if (target.effectiveHealthPercent < 40) {
       return true;
     }
-    if (target.effectiveHealthPercent < 80) {
+    if (target.timeToDeath() < 3) {
+      return true;
+    }
+    if (target.effectiveHealthPercent < 78) {
       return true;
     }
     const ch = spell.getCharges("Penance");
-    return ch >= 2 && target.effectiveHealthPercent < 88;
+    return ch >= 2 && target.effectiveHealthPercent < 86;
   }
 
   canSafelyApplyAtonement() {
+    // Solo shuffle: more aggressive atonement application
     if (!me.inCombat()) {
       return true;
     }
-    if (this.healTarget && this.healTarget.effectiveHealthPercent < SAFE_ATONEMENT_SPREAD_HP) {
+    if (this.healTarget && this.healTarget.effectiveHealthPercent < 58) {
       return false;
     }
     const friends = me.getPlayerFriends(40);
@@ -942,7 +1017,7 @@ export class PriestDisciplinePvP extends Behavior {
       if (!this.isNotDeadAndInLineOfSight(friend)) {
         continue;
       }
-      if (friend.effectiveHealthPercent < SAFE_ATONEMENT_SPREAD_HP || friend.timeToDeath() < 5) {
+      if (friend.effectiveHealthPercent < 58 || friend.timeToDeath() < 2.5) {
         return false;
       }
     }
@@ -950,17 +1025,17 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   /**
-   * Offensive Penance only when triage does not need the channel (Oracle damage = healing).
+   * Offensive Penance: raw HP first, then TTD (solo shuffle = 2-3s death window)
    */
   canOffensivePenance(enemy) {
     if (!enemy || !me.inCombat()) {
       return false;
     }
     const ht = this.healTarget;
-    if (ht && (ht.effectiveHealthPercent < 48 || ht.timeToDeath() < 3.5)) {
+    if (ht && (ht.effectiveHealthPercent < 36 || ht.timeToDeath() < 2.5)) {
       return false;
     }
-    if (ht && ht.effectiveHealthPercent < 62 && spell.getCharges("Penance") < 2) {
+    if (ht && ht.effectiveHealthPercent < 52 && spell.getCharges("Penance") < 2) {
       return false;
     }
     const charges = spell.getCharges("Penance");
@@ -1097,6 +1172,7 @@ export class PriestDisciplinePvP extends Behavior {
     if (!me || !me.isCastingOrChanneling) {
       return false;
     }
+    // Check both channel AND cast to cover full cast duration
     const current = me.currentChannel || me.currentCast;
     return current === 47540 || current === 421453 || current === 400169;
   }
@@ -1240,7 +1316,6 @@ export class PriestDisciplinePvP extends Behavior {
     // Prioritize current target if it doesn't have SW:P and isn't immune
     if (me.targetUnit &&
       me.targetUnit.isPlayer() &&
-      !me.targetUnit.isHealer() &&
       !this.hasShadowWordPain(me.targetUnit) &&
       !pvpHelpers.hasImmunity(me.targetUnit) &&
       me.distanceTo(me.targetUnit) <= 40 &&
@@ -1252,7 +1327,7 @@ export class PriestDisciplinePvP extends Behavior {
     const enemies = me.getPlayerEnemies(40);
     for (const enemy of enemies) {
       if (enemy.isPlayer() &&
-        !enemy.isHealer() &&
+        (!enemy.isHealer() || !enemy.isCCd()) &&
         me.withinLineOfSight(enemy) &&
         !this.hasShadowWordPain(enemy) &&
         !pvpHelpers.hasImmunity(enemy)) {
@@ -1264,8 +1339,10 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   shouldHoldShadowWordPainForHealing() {
+    // Solo shuffle: raw HP first, then TTD (people die in 2-3s)
     const ht = this.healTarget;
-    if (ht && this.isNotDeadAndInLineOfSight(ht) && ht.effectiveHealthPercent < OFFENSIVE_SWP_HEALING_LOCK_HP) {
+    if (ht && this.isNotDeadAndInLineOfSight(ht) &&
+      (ht.effectiveHealthPercent < OFFENSIVE_SWP_HEALING_LOCK_HP || ht.timeToDeath() < 2.5)) {
       return true;
     }
 
@@ -1274,7 +1351,7 @@ export class PriestDisciplinePvP extends Behavior {
       if (!this.isNotDeadAndInLineOfSight(friend)) {
         continue;
       }
-      if (friend.effectiveHealthPercent < OFFENSIVE_SWP_HEALING_LOCK_HP) {
+      if (friend.effectiveHealthPercent < OFFENSIVE_SWP_HEALING_LOCK_HP || friend.timeToDeath() < 2.5) {
         return true;
       }
     }
@@ -1283,8 +1360,9 @@ export class PriestDisciplinePvP extends Behavior {
 
   shouldPauseOffensiveDispelsForHealing() {
     const ht = this.healTarget;
+    // Solo shuffle: raw HP first, then TTD (2-3s death window)
     if (ht && this.isNotDeadAndInLineOfSight(ht) &&
-      (ht.effectiveHealthPercent < 90 || ht.timeToDeath() < 4.5)) {
+      (ht.effectiveHealthPercent < 78 || ht.timeToDeath() < 2.5)) {
       return true;
     }
 
@@ -1292,7 +1370,7 @@ export class PriestDisciplinePvP extends Behavior {
       if (!this.isNotDeadAndInLineOfSight(friend)) {
         continue;
       }
-      if (friend.effectiveHealthPercent < 80 || friend.timeToDeath() < 4) {
+      if (friend.effectiveHealthPercent < 68 || friend.timeToDeath() < 2.5) {
         return true;
       }
     }

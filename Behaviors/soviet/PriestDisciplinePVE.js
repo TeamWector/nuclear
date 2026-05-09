@@ -35,7 +35,6 @@ export class PriestDiscipline extends Behavior {
       header: "Discipline Priest (Midnight)",
       options: [
         { type: "slider", uid: "DiscPainSuppressionHealth", text: "Pain Suppression threshold (%)", min: 20, max: 60, default: 35 },
-        { type: "slider", uid: "DiscRaptureHealth", text: "Rapture threshold (%)", min: 20, max: 60, default: 40 },
         { type: "slider", uid: "DiscVoidShiftHealth", text: "Void Shift threshold (%)", min: 10, max: 40, default: 24 },
         { type: "slider", uid: "DiscEvangelismHealth", text: "Evangelism health trigger (%)", min: 40, max: 90, default: 75 },
         { type: "slider", uid: "DiscEvangelismAtonements", text: "Min atonements for Evangelism", min: 2, max: 8, default: 3 },
@@ -94,18 +93,10 @@ export class PriestDiscipline extends Behavior {
       spell.cast("Pain Suppression", on => this.healTarget, ret =>
         this.shouldUsePainSuppression(this.healTarget)),
 
-      spell.cast("Rapture", on => this.healTarget, ret =>
-        me.inCombat() && !this.usedMajorHealCDRecently()
-        && this.shouldCastWithHealthAndNotPainSupp(this.healTarget, Settings.DiscRaptureHealth)),
-
       spell.cast("Void Shift", on => this.healTarget, ret =>
         me.inCombat() && !this.usedMajorHealCDRecently()
         && this.shouldCastWithHealthAndNotPainSupp(this.healTarget, Settings.DiscVoidShiftHealth)
         && me.effectiveHealthPercent > 35),
-
-      // Rapture active -- spam PW:S on everyone
-      spell.cast("Power Word: Shield", on => this.findFriendWithoutShield(), ret =>
-        me.hasAuraByMe("Rapture") && this.findFriendWithoutShield() !== undefined),
 
       // Defensive Penance when someone is critically low
       spell.cast("Penance", on => this.healTarget, ret =>
@@ -133,12 +124,16 @@ export class PriestDiscipline extends Behavior {
 
       spell.cast("Power Word: Radiance", on => me, ret => this.shouldCastRadiance()),
 
+      // Shields before damage weave: dying heal target → tanks → hurt allies.
+      spell.cast("Void Shield", on => this.getVoidShieldTarget(), ret =>
+        this.getVoidShieldTarget() !== undefined),
+
+      spell.cast("Power Word: Shield", on => this.getShieldPriorityTarget(), ret =>
+        this.getShieldPriorityTarget() !== undefined),
+
       // =====================================================
       // CORE DAMAGE PRIORITY (Oracle) -- healing via Atonement
       // =====================================================
-
-      spell.cast("Void Shield", on => this.getVoidShieldTarget(), ret =>
-        me.hasAura(auras.voidShield) && this.getVoidShieldTarget() !== undefined),
 
       // Post-Evangelism: spam Radiance charges (they're instant cast after Evangelism)
       spell.cast("Power Word: Radiance", on => me, ret =>
@@ -180,17 +175,10 @@ export class PriestDiscipline extends Behavior {
       spell.cast("Shadow Mend", on => this.healTarget, ret =>
         me.hasAura(auras.shadowMend) && this.healTarget?.effectiveHealthPercent < 90),
 
-      // PW:S on hurt ally -- absorb + atonement apply/refresh
-      spell.cast("Power Word: Shield", on => this.healTarget, ret =>
-        this.healTarget && !this.hasShield(this.healTarget)
-        && !me.hasAuraByMe("Rapture")
-        && this.healTarget.effectiveHealthPercent < 85),
-
       // Plea: raid-style atonement touch-up; rarely used in Mythic+
       spell.cast("Plea", on => this.healTarget, ret =>
         !me.inMythicPlus()
         && this.healTarget && this.healTarget.effectiveHealthPercent < 85
-        && !me.hasAuraByMe("Rapture")
         && (!this.hasAtonement(this.healTarget)
           || this.healTarget.getAuraByMe(auras.atonement)?.remaining < 4000)),
 
@@ -270,7 +258,6 @@ export class PriestDiscipline extends Behavior {
     if (spell.getTimeSinceLastCast("Pain Suppression") < window) return true;
     if (spell.getTimeSinceLastCast("Desperate Prayer") < window) return true;
     if (spell.getTimeSinceLastCast("Evangelism") < window) return true;
-    if (spell.isSpellKnown("Rapture") && spell.getTimeSinceLastCast("Rapture") < window) return true;
     if (spell.isSpellKnown("Void Shift") && spell.getTimeSinceLastCast("Void Shift") < window) return true;
     return false;
   }
@@ -343,17 +330,53 @@ export class PriestDiscipline extends Behavior {
     return undefined;
   }
 
-  getVoidShieldTarget() {
-    if (this.healTarget && !this.hasShield(this.healTarget)) {
-      return this.healTarget;
+  getShieldPriorityTarget() {
+    const ht = this.healTarget;
+    if (ht && this.isNotDeadAndInLineOfSight(ht) && !this.hasShield(ht)
+      && (ht.effectiveHealthPercent < 35 || ht.timeToDeath() < 3)) {
+      return ht;
     }
-    const tanks = h.friends.Tanks;
-    for (const tank of tanks) {
+    for (const tank of h.friends.Tanks) {
       if (this.isNotDeadAndInLineOfSight(tank) && !this.hasShield(tank)) {
         return tank;
       }
     }
-    return this.findFriendWithoutShield();
+    if (ht && this.isNotDeadAndInLineOfSight(ht) && !this.hasShield(ht) && ht.effectiveHealthPercent < 85) {
+      return ht;
+    }
+    for (const friend of me.getFriends()) {
+      if (this.isNotDeadAndInLineOfSight(friend) && !this.hasShield(friend) && friend.effectiveHealthPercent < 85) {
+        return friend;
+      }
+    }
+    return undefined;
+  }
+
+  getVoidShieldTarget() {
+    if (!me.hasAura(auras.voidShield)) {
+      return undefined;
+    }
+    const ht = this.healTarget;
+    if (ht && this.isNotDeadAndInLineOfSight(ht) && !this.hasShield(ht)
+      && (ht.effectiveHealthPercent < 35 || ht.timeToDeath() < 3)) {
+      return ht;
+    }
+    for (const tank of h.friends.Tanks) {
+      if (this.isNotDeadAndInLineOfSight(tank) && !this.hasShield(tank)) {
+        return tank;
+      }
+    }
+
+    if (this.healTarget && !this.hasShield(this.healTarget) && this.healTarget.effectiveHealthPercent < 96) {
+      return this.healTarget;
+    }
+    const friends = me.getFriends();
+    for (const friend of friends) {
+      if (this.isNotDeadAndInLineOfSight(friend) && !this.hasShield(friend) && friend.effectiveHealthPercent < 92) {
+        return friend;
+      }
+    }
+    return undefined;
   }
 
   findFriendWithoutShield() {
@@ -400,7 +423,7 @@ export class PriestDiscipline extends Behavior {
   }
 
   hasShield(target) {
-    return target?.hasAura(auras.powerWordShield) || false;
+    return target?.hasAuraByMe(auras.powerWordShield) || false;
   }
 
   hasShadowWordPain(target) {
