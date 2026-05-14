@@ -4,6 +4,7 @@ import objMgr from '@/Core/ObjectManager';
 import { me } from '@/Core/ObjectManager';
 import colors from '@/Enums/Colors';
 import { Classification } from '@/Enums/UnitEnums';
+import { UnitFlags, UnitFlags2, UnitFlags3, NpcFlags, DynamicFlags } from '@/Enums/Flags';
 
 const objectColors = {
   herbs: colors.green,
@@ -40,6 +41,7 @@ class Radar {
     { type: "checkbox", uid: "ExtraRadarDrawDistance", text: "Draw Distance", default: false },
     { type: "checkbox", uid: "ExtraRadarDrawDebug", text: "Draw Debug Info", default: false },
     { type: "checkbox", uid: "ExtraRadarInteractTracked", text: "Interact Tracked", default: false },
+    { type: "checkbox", uid: "ExtraRadarMouseoverDebug", text: "Mouseover Debug (Flags)", default: false },
     { type: "slider", uid: "ExtraRadarLoadDistance", text: "Radar Load Distance", default: 200, min: 1, max: 500 }
   ];
 
@@ -172,7 +174,97 @@ class Radar {
     return me.distanceTo2D(obj.position) <= Settings.ExtraRadarLoadDistance;
   }
 
+  static decodeFlags(value, flagsObj) {
+    if (!value) return "0";
+    const isBig = typeof value === "bigint";
+    const names = [];
+    for (const [name, bit] of Object.entries(flagsObj)) {
+      if (bit === 0) continue;
+      const bitVal = isBig ? BigInt(bit) : bit;
+      if ((value & bitVal) === bitVal) names.push(name);
+    }
+    const hexStr = isBig ? value.toString(16) : (value >>> 0).toString(16);
+    return `0x${hexStr}${names.length ? ` (${names.join(" | ")})` : ""}`;
+  }
+
+  static drawMouseoverDebug() {
+    if (!Settings.ExtraRadarMouseoverDebug) return;
+
+    const guid = wow.GameUI.mouseOverGuid;
+    if (!guid || guid.isNull) return;
+
+    const obj = objMgr.findObject(guid);
+    if (!obj) return;
+
+    const drawList = imgui.getBackgroundDrawList();
+    if (!drawList) return;
+
+    const hex = v => {
+      if (v === undefined || v === null) return "n/a";
+      if (typeof v === "bigint") return `0x${v.toString(16)}`;
+      return `0x${(v >>> 0).toString(16)}`;
+    };
+    const lines = [
+      `${obj.name || "<no name>"}  [entryId: ${obj.entryId}]`,
+      `type          = ${obj.type}  typeFlags = ${hex(obj.typeFlags)}`,
+      `flags         = ${hex(obj.flags)}`,
+      `dynamicFlags  = ${this.decodeFlags(obj.dynamicFlags, DynamicFlags)}`,
+    ];
+
+    if (obj instanceof wow.CGUnit) {
+      lines.push(
+        `--- CGUnit ---`,
+        `unitFlags     = ${this.decodeFlags(obj.unitFlags, UnitFlags)}`,
+        `unitFlags2    = ${this.decodeFlags(obj.unitFlags2, UnitFlags2)}`,
+        `unitFlags3    = ${this.decodeFlags(obj.unitFlags3, UnitFlags3)}`,
+        `npcFlags      = ${this.decodeFlags(obj.npcFlags, NpcFlags)}`,
+        `classification= ${obj.classification}`,
+        `factionTemplate= ${obj.factionTemplate}`,
+        `isAttackable  = ${obj.isAttackable}`,
+        `isEnemy       = ${obj.isEnemy}`,
+        `isRelatedToActiveQuest = ${obj.isRelatedToActiveQuest}`,
+      );
+    } else if (obj instanceof wow.CGGameObject) {
+      lines.push(
+        `--- CGGameObject ---`,
+        `goType        = ${obj.goType}`,
+        `goState       = ${obj.goState}`,
+        `goFlags       = ${hex(obj.goFlags)}`,
+        `goFactionTemplate = ${obj.goFactionTemplate}`,
+        `goUsable      = ${obj.goUsable}`,
+        `isLootable    = ${obj.isLootable}`,
+      );
+    } else if (obj instanceof wow.CGAreaTrigger) {
+      lines.push(
+        `--- CGAreaTrigger ---`,
+        `spellId       = ${obj.spellId}`,
+        `caster        = ${obj.caster}`,
+        `duration      = ${obj.duration}`,
+        `numUnitsInside= ${obj.numUnitsInside}`,
+        `numPlayersInside= ${obj.numPlayersInside}`,
+      );
+    } else if (obj instanceof wow.CGItem) {
+      lines.push(
+        `--- CGItem ---`,
+        `itemFlags     = ${hex(obj.itemFlags)}`,
+        `itemDynamicFlags= ${hex(obj.itemDynamicFlags)}`,
+      );
+    } else {
+      lines.push(`--- ${obj.constructor.name} ---`);
+    }
+
+    const mouse = imgui.getMousePos();
+    const startPos = { x: mouse.x + 16, y: mouse.y + 16 };
+    const lineHeight = 16;
+
+    lines.forEach((line, i) => {
+      drawList.addText(line, { x: startPos.x, y: startPos.y + i * lineHeight }, colors.yellow);
+    });
+  }
+
   static tick() {
+    this.drawMouseoverDebug();
+
     if (!Settings.ExtraRadar) return;
 
     const trackedObjects = new Set();
