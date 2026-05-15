@@ -135,6 +135,12 @@ class CombatTargeting extends Targeting {
 
     if (facingTargets.length === 0) return null;
 
+    const currentTarget = me.targetUnit;
+    if (currentTarget) {
+      const match = facingTargets.find(t => t === currentTarget || t.guid?.equals(currentTarget.guid));
+      if (match) return match;
+    }
+
     switch (targetPriority) {
       case "Closest":
         return facingTargets.reduce((closest, current) =>
