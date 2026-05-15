@@ -83,13 +83,10 @@ class Common {
 
   static ensureAutoAttack() {
     return new bt.Action(() => {
-      const autoAttack = Spell.getSpell("Auto Attack")
-
-      if (!autoAttack.isActive) {
-        me.toggleAttack();
-        return bt.Status.Success;
+      const autoAttack = Spell.getSpell("Auto Attack");
+      if (autoAttack && !autoAttack.isActive) {
+        me.startAttack();
       }
-
       return bt.Status.Failure;
     }, "Ensure Auto Attacking");
   }
