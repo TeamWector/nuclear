@@ -360,11 +360,10 @@ class MacroBridgeListener extends wow.EventListener {
     if (event.name !== "CHAT_MSG_CHANNEL") return;
     const text = event.args?.[0];
     const sender = event.args?.[1];
-    if (typeof text !== "string" || typeof sender !== "string") return;
-    if (!me?.name) return;
+    const myName = me?.unsafeName;
+    if (typeof text !== "string" || typeof sender !== "string" || typeof myName !== "string") return;
 
-    const senderName = sender.split("-")[0];
-    if (senderName !== me.name) return;
+    if (sender.split("-")[0] !== myName) return;
 
     const parts = text.split(":");
     if (parts[0] !== "STYX") return;
