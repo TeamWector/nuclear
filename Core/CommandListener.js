@@ -355,4 +355,31 @@ class FailedCastListener extends wow.EventListener {
 
 new FailedCastListener();
 
+class MacroBridgeListener extends wow.EventListener {
+  onEvent(event) {
+    if (event.name !== "CHAT_MSG_CHANNEL") return;
+    const text = event.args?.[0];
+    const sender = event.args?.[1];
+    if (typeof text !== "string" || typeof sender !== "string") return;
+    if (!me?.name) return;
+
+    const senderName = sender.split("-")[0];
+    if (senderName !== me.name) return;
+
+    const parts = text.split(":");
+    if (parts[0] !== "STYX") return;
+
+    const [, verb, spellName, targetArg] = parts;
+    if (verb === "cast") {
+      if (!spellName) return;
+      const target = (targetArg || "target").toLowerCase();
+      commandListener.queueFromSlot({ spellName, target });
+    } else if (verb === "clear") {
+      commandListener.clearQueue();
+    }
+  }
+}
+
+new MacroBridgeListener();
+
 export default commandListener;
