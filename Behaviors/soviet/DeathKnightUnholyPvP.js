@@ -60,7 +60,7 @@ export class DeathKnightUnholy extends Behavior {
         ret => me.pet && me.pet.hasAuraByMe(auras.darkTransformation),
         spell.interrupt("Leap", true)
       ),
-      spell.interrupt("Gnaw", true),
+      this.gnawInterrupt(),
       common.waitForFacing(),
       spell.cast("Raise Dead", on => me, req => !Pet.current),
       spell.interrupt("Mind Freeze", true),
@@ -165,6 +165,31 @@ export class DeathKnightUnholy extends Behavior {
     return Combat.burstToggle && me.target && me.isWithinMeleeRange(me.target) && (
       !spell.isOnCooldown("Army of the Dead") ||
       !spell.isOnCooldown("Dark Transformation")
+    );
+  }
+
+  gnawInterrupt() {
+    // Gnaw interrupt - only interrupt targets with <2 stacks of stun DR, 15 yard range
+    return new bt.Sequence(
+      new bt.Action(() => {
+        if (!me.pet) return bt.Status.Failure;
+        const gnawSpell = Spell.getSpell("Gnaw");
+        if (!gnawSpell || !gnawSpell.cooldown.ready) return bt.Status.Failure;
+
+        const nearbyEnemies = me.getPlayerEnemies(15);
+        for (const unit of nearbyEnemies) {
+          if (unit.isCastingOrChanneling &&
+            unit.isInterruptible &&
+            unit.getDR("stun") < 2 &&
+            me.isFacing(unit) &&
+            me.withinLineOfSight(unit)) {
+            if (gnawSpell.cast(unit)) {
+              return bt.Status.Success;
+            }
+          }
+        }
+        return bt.Status.Failure;
+      })
     );
   }
 

@@ -475,19 +475,23 @@ class Spell extends wow.EventListener {
           // Generate a random interrupt time between 300 and 1100 ms (700 ± 400)
           const randomInterruptTime = 700 + (Math.random() * 800 - 400);
 
+          // castPctComplete = percentage of cast that has completed (0 = just started, 100 = nearly finished)
+          // Interrupt when (100 - castPctComplete) <= (100 - InterruptPercentage), i.e., castPctComplete >= InterruptPercentage
+          const castPctComplete = ((castTime - castRemains) / castTime) * 100;
+
           // Check if we should interrupt based on the settings
           let shouldInterrupt = false;
           if (Settings.InterruptMode === "Everything") {
             if (target.isChanneling) {
               shouldInterrupt = channelTime > randomInterruptTime;
             } else {
-              shouldInterrupt = castPctRemain <= Settings.InterruptPercentage;
+              shouldInterrupt = castPctComplete >= Settings.InterruptPercentage;
             }
           } else if (Settings.InterruptMode === "List") {
             if (target.isChanneling) {
               shouldInterrupt = interrupts[castInfo.spellCastId] && channelTime > randomInterruptTime;
             } else {
-              shouldInterrupt = interrupts[castInfo.spellCastId] && castPctRemain <= Settings.InterruptPercentage;
+              shouldInterrupt = interrupts[castInfo.spellCastId] && castPctComplete >= Settings.InterruptPercentage;
             }
           }
 

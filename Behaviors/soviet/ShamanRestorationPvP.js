@@ -10,6 +10,7 @@ import { DispelPriority } from "@/Data/Dispels";
 import { WoWDispelType } from "@/Enums/Auras";
 import Settings from "@/Core/Settings";
 import { spellBlacklist } from "@/Data/PVPData";
+import { KlassType } from "@/Enums/UnitEnums";
 
 const auras = {
   earthShield: 974,
@@ -30,6 +31,13 @@ const auras = {
   spiritWalkersGrace: 79206,
 };
 
+const tremorFearSpells = new Set([
+  5782, // Fear (Warlock)
+  5484, // Howl of Terror (Warlock)
+  8122, // Psychic Scream (Priest)
+  205369, // Mind Bomb (Priest)
+]);
+
 export class ShamanRestorationPvP extends Behavior {
   name = "Restoration Shaman PvP (Midnight Farseer)";
   context = BehaviorContext.Any;
@@ -37,6 +45,17 @@ export class ShamanRestorationPvP extends Behavior {
   version = wow.GameVersion.Retail;
 
   healTarget = null;
+
+  // Tremor Totem: avoid predictive drops unless a Priest is actually threatening range.
+  // We sample distance occasionally. If a Priest is already within ~15y, that's enough.
+  // If they're approaching from farther out, we also track a simple closing pattern:
+  // enter >20y band, then cross into <=15y while distance is decreasing (higher priority).
+  tremorPriestProximity = {
+    lastSampleMs: 0,
+    lastDistance: null,
+    entered20: false,
+    crossed15Closing: false,
+  };
 
   static settings = [
     {
@@ -47,7 +66,7 @@ export class ShamanRestorationPvP extends Behavior {
         { type: "slider", uid: "RShamPvPNaturesSwiftnessPct", text: "Nature's Swiftness HP % (emergency heal)", default: 50, min: 0, max: 100 },
         { type: "slider", uid: "RShamPvPSpiritLinkPct", text: "Spirit Link Totem HP %", default: 33, min: 0, max: 100 },
         { type: "slider", uid: "RShamPvPHealingTidePct", text: "Healing Tide Totem HP %", default: 42, min: 0, max: 100 },
-        { type: "slider", uid: "RShamPvPUnleashLifePct", text: "Unleash Life HP %", default: 70, min: 0, max: 100 },
+        { type: "slider", uid: "RShamPvPUnleashLifePct", text: "Unleash Life HP %", default: 60, min: 0, max: 100 },
         { type: "slider", uid: "RShamPvPRiptidePct", text: "Riptide HP %", default: 85, min: 0, max: 100 },
         { type: "slider", uid: "RShamPvPHealingWavePct", text: "Healing Wave HP %", default: 80, min: 0, max: 100 },
         { type: "checkbox", uid: "RShamPvPUsePurge", text: "Use Greater Purge", default: false },
@@ -270,6 +289,10 @@ export class ShamanRestorationPvP extends Behavior {
         me.hasAura(auras.tidalWaves) &&
         this.healTarget?.effectiveHealthPercent < Settings.RShamPvPHealingWavePct
       ),
+      // Surging Totem (~25s CD / duration); low in list — try every tick, engine no-ops if on CD
+      spell.cast("Surging Totem", on => me, ret =>
+        spell.isSpellKnown("Surging Totem") && me.inCombat()
+      ),
       // Healing Wave filler
       spell.cast("Healing Wave", on => this.healTarget, ret =>
         this.healTarget?.effectiveHealthPercent < 90
@@ -396,41 +419,136 @@ export class ShamanRestorationPvP extends Behavior {
     if (this.isTotemActive("Tremor Totem")) return false;
     if (spell.getTimeSinceLastCast("Tremor Totem") < 2000) return false;
 
-    // Immediate break for already-applied fear / mind control style effects.
-    const allies = heal.priorityList.filter(ally => ally && ally.isPlayer());
-    allies.push(me);
-    const allyUnderCC = allies.some(ally =>
-      ally.isFeared || ally.hasAura("Mind Control") || ally.hasAura("Fear")
-    );
-    if (allyUnderCC) return true;
+    const isEnemyPriestWithinYards = (yards) => {
+      const enemies = combat.targets.filter(unit => unit && unit.isPlayer());
+      return enemies.some(enemy =>
+        enemy.klass === KlassType.Priest &&
+        me.distanceTo(enemy) <= yards &&
+        me.withinLineOfSight(enemy)
+      );
+    };
 
-    // Predictive drop only for true casted fear/MC spells to avoid random Tremors.
-    const tremorReactiveCasts = new Set([
-      5782, // Fear
-      605, // Mind Control
-      383121, // Mass Fear
-      64044, // Psychic Horror
-    ]);
+    const getNearestEnemyPriestDistance = () => {
+      let best = null;
+      const enemies = combat.targets.filter(unit => unit && unit.isPlayer());
+      for (const enemy of enemies) {
+        if (enemy.klass !== KlassType.Priest) continue;
+        if (!me.withinLineOfSight(enemy)) continue;
+        const d = me.distanceTo(enemy);
+        if (best === null || d < best) best = d;
+      }
+      return best;
+    };
 
-    const enemies = combat.targets.filter(unit => unit && unit.isPlayer());
-    for (const enemy of enemies) {
-      try {
-        if (!enemy.isCastingOrChanneling || !enemy.spellInfo) continue;
-        const info = enemy.spellInfo;
-        const targetGuid = info.spellTargetGuid;
-        if (!targetGuid) continue;
-        if (!tremorReactiveCasts.has(info.spellCastId)) continue;
+    const updatePriestProximityHysteresis = () => {
+      const now = wow.frameTime;
+      const nearest = getNearestEnemyPriestDistance();
+      if (nearest === null || nearest > 22) {
+        this.tremorPriestProximity = {
+          lastSampleMs: 0,
+          lastDistance: null,
+          entered20: false,
+          crossed15Closing: false,
+        };
+        return;
+      }
 
-        const castRemains = info.castEnd - wow.frameTime;
-        const isTargetingAlly = targetGuid.equals(me.guid) ||
-          heal.priorityList.some(ally => ally && targetGuid.equals(ally.guid));
-        if (isTargetingAlly && castRemains > 0 && castRemains <= 1200) {
-          return true;
+      // Sample every ~150ms to reduce jitter / per-tick noise.
+      if (now - this.tremorPriestProximity.lastSampleMs < 150) return;
+      this.tremorPriestProximity.lastSampleMs = now;
+
+      const prev = this.tremorPriestProximity.lastDistance;
+      this.tremorPriestProximity.lastDistance = nearest;
+
+      if (nearest > 20) {
+        this.tremorPriestProximity.entered20 = true;
+      }
+
+      if (this.tremorPriestProximity.entered20 && nearest <= 15) {
+        const closing = prev === null ? true : nearest < prev - 0.25;
+        if (closing) this.tremorPriestProximity.crossed15Closing = true;
+      }
+    };
+
+    const isWarlockCastingFearAtMe = () => {
+      const enemies = combat.targets.filter(unit => unit && unit.isPlayer());
+      for (const enemy of enemies) {
+        try {
+          if (enemy.klass !== KlassType.Warlock) continue;
+          if (!enemy.isCastingOrChanneling || !enemy.spellInfo) continue;
+          const info = enemy.spellInfo;
+          const targetGuid = info.spellTargetGuid;
+          if (!targetGuid || !targetGuid.equals(me.guid)) continue;
+          if (!tremorFearSpells.has(info.spellCastId)) continue;
+
+          const castRemains = info.castEnd - wow.frameTime;
+          if (castRemains > 0 && castRemains <= 1200 && me.withinLineOfSight(enemy)) return true;
+        } catch {
+          // Skip stale reads.
         }
-      } catch {
-        // Skip stale reads.
+      }
+      return false;
+    };
+
+    const isFearedLike = (unit) =>
+      !!unit && (unit.isFeared() || unit.hasAura("Fear"));
+
+    // If we're actively feared, Tremor is worth pressing even if we're already on disorient DR.
+    if (isFearedLike(me)) return true;
+
+    let disorientDR = 0;
+    try {
+      disorientDR = me.getDR("disorient") || 0;
+    } catch {
+      disorientDR = 0;
+    }
+
+    // Warlock Fear gate: only when it's actually being cast on us.
+    // This is independent of Priest proximity hysteresis.
+    if (isWarlockCastingFearAtMe()) return true;
+
+    // Priest predictive Tremor only when we're clean on disorient DR (avoid "willy nilly" drops).
+    if (disorientDR > 0) {
+      this.tremorPriestProximity = {
+        lastSampleMs: 0,
+        lastDistance: null,
+        entered20: false,
+        crossed15Closing: false,
+      };
+      return false;
+    }
+
+    updatePriestProximityHysteresis();
+
+    // Priest proximity gate: Psychic Scream / Mind Bomb only matters when they're close enough to land.
+    const priestAlreadyClose = isEnemyPriestWithinYards(15);
+    const priestApproachArmed = this.tremorPriestProximity.crossed15Closing && priestAlreadyClose;
+    const priestProximityOk = priestAlreadyClose;
+
+    if (priestProximityOk) {
+      const enemies = combat.targets.filter(unit => unit && unit.isPlayer());
+      for (const enemy of enemies) {
+        try {
+          if (enemy.klass !== KlassType.Priest) continue;
+          if (!enemy.isCastingOrChanneling || !enemy.spellInfo) continue;
+          const info = enemy.spellInfo;
+          const targetGuid = info.spellTargetGuid;
+          if (!targetGuid) continue;
+          if (!tremorFearSpells.has(info.spellCastId)) continue;
+
+          const castRemains = info.castEnd - wow.frameTime;
+          const isTargetingAlly = targetGuid.equals(me.guid) ||
+            heal.priorityList.some(ally => ally && targetGuid.equals(ally.guid));
+          const castWindowMs = priestApproachArmed ? 1500 : 1200;
+          if (isTargetingAlly && castRemains > 0 && castRemains <= castWindowMs && me.withinLineOfSight(enemy)) {
+            return true;
+          }
+        } catch {
+          // Skip stale reads.
+        }
       }
     }
+
     return false;
   }
 
