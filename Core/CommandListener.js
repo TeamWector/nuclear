@@ -355,20 +355,18 @@ class FailedCastListener extends wow.EventListener {
 
 new FailedCastListener();
 
+const STYX_CVAR = "StyxBridge";
+
 class MacroBridgeListener extends wow.EventListener {
   onEvent(event) {
-    if (event.name !== "CHAT_MSG_CHANNEL") return;
-    const text = event.args?.[0];
-    const sender = event.args?.[1];
-    const myName = me?.unsafeName;
-    if (typeof text !== "string" || typeof sender !== "string" || typeof myName !== "string") return;
+    if (event.name !== "CVAR_UPDATE") return;
+    const [name, raw] = event.args || [];
+    if (name !== STYX_CVAR || typeof raw !== "string") return;
 
-    if (sender.split("-")[0] !== myName) return;
+    const payload = raw.split("|")[0];
+    const parts = payload.split(":");
 
-    const parts = text.split(":");
-    if (parts[0] !== "STYX") return;
-
-    const [, verb, spellName, targetArg] = parts;
+    const [verb, spellName, targetArg] = parts;
     if (verb === "cast") {
       if (!spellName) return;
       const target = (targetArg || "target").toLowerCase();
