@@ -15,6 +15,7 @@ class Spell extends wow.EventListener {
     this._currentTarget = null;
     this._lastCastTimes = new Map();
     this._lastSuccessfulCastTimes = new Map();
+    this._lastNonInstantCastTime = 0;
     this._lastSuccessfulSpells = []; // Array to store the last successful spells
   }
 
@@ -43,7 +44,9 @@ class Spell extends wow.EventListener {
           const spellName = castSpell.name.toLowerCase();
           const targetName = eventData.target ? eventData.target.unsafeName : "Unknown";
           this._lastSuccessfulCastTimes.set(spellName, wow.frameTime);
-          this._lastCastTimes.set(spellId, wow.frameTime);
+          if (castSpell.castTime > 0) {
+            this._lastNonInstantCastTime = wow.frameTime;
+          }
 
           // Add to spell history array for combo strike tracking
           this._lastSuccessfulSpells.push({
@@ -640,17 +643,14 @@ class Spell extends wow.EventListener {
   }
 
   /**
-   * Checks if enough time has passed since the last successful cast to cast the spell again.
-   * @param {wow.Spell} spell - The spell to check.
-   * @returns {boolean} - Whether the spell can be cast after the delay.
+   * Global post-cast gate: after any successful non-instant cast, block all
+   * subsequent casts for Settings.SpellCastDelay ms.
+   * @param {wow.Spell} spell - The spell to check (unused; gate is global).
+   * @returns {boolean} - Whether the global post-cast delay has elapsed.
    */
   canCastAfterDelay(spell) {
-    if (spell.castTime === 0) return true;
-
-    const lastCastTime = this._lastSuccessfulCastTimes.get(spell.name.toLowerCase());
-    if (!lastCastTime) return true;
-
-    return (wow.frameTime - lastCastTime) >= Settings.SpellCastDelay;
+    if (!this._lastNonInstantCastTime) return true;
+    return (wow.frameTime - this._lastNonInstantCastTime) >= Settings.SpellCastDelay;
   }
 
   /**
