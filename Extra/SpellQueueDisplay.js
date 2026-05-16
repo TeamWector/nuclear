@@ -10,7 +10,6 @@ const SpellQueueDisplay = {
   options: [
     { type: "checkbox", uid: "SpellQueueSystemEnabled", text: "Enable spell queue (keybinds + on-screen queue)", default: true },
     { type: "slider", uid: "SpellQueueExpirationTimer", text: "Spell queue expiration (ms)", min: 2000, max: 5000, default: 3000 },
-    { type: "slider", uid: "SpellCastDelay", text: "Spell cast delay (ms)", min: 0, max: 1000, default: 0 },
     { type: "checkbox", uid: "SpellDebugCompare", text: "Log default rotation comparison", default: false },
     { type: "slider", uid: "FailedCastPauseMs", text: "Failed cast pause duration (ms)", min: 0, max: 5000, default: 50 },
     { type: "checkbox", uid: "FailedCastPauseDebugLogs", text: "Failed cast pause debug logs", default: false }
@@ -36,8 +35,8 @@ const SpellQueueDisplay = {
 
   renderOptions: function(renderOptionsGroup) {
     renderOptionsGroup([
-      { header: "Spell queue", options: this.options.slice(0, 4) },
-      { header: "When \"pause on failed casts\" is on (General tab)", options: this.options.slice(4, 6) }
+      { header: "Spell queue", options: this.options.slice(0, 3) },
+      { header: "When \"pause on failed casts\" is on (General tab)", options: this.options.slice(3, 5) }
     ]);
 
     imgui.spacing();
