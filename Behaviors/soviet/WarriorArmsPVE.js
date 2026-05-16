@@ -18,6 +18,7 @@ const auras = {
   sweepingStrikes: 260708,
   avatar: 107574,
   mortalWounds: 115804,
+  collateralDamage: 334783,
 };
 
 const spells = {
@@ -70,6 +71,19 @@ export class WarriorArmsPVE extends Behavior {
   }
 
   mainRotation() {
+    const enemyCount = this.getEnemiesInRange(8);
+
+    // 3+ targets: Cleave-focused AoE rotation
+    if (enemyCount >= 3) {
+      return this.aoeCleaveRotation();
+    }
+
+    // 2 targets: Sweeping Strikes + single target rotation
+    if (enemyCount === 2) {
+      return this.sweepingStrikesRotation();
+    }
+
+    // Single target
     if (this.isExecutePhase()) {
       return this.executeRotation();
     }
@@ -81,7 +95,7 @@ export class WarriorArmsPVE extends Behavior {
       // Rend upkeep - refresh when < 4 seconds remaining
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
-      // Demolish during Colossus Smash (Colossos build)
+      // Demolish during Colossus Smash (Colossus build)
       spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
 
       // Heroic Strike
@@ -100,13 +114,7 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
       // Slam to fill
-      spell.cast("Slam", on => me.target, ret => this.shouldSlam()),
-
-      // Sweeping Strikes for AoE (will fall through if not AoE)
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
-
-      // AoE filler
-      this.aoeRotation()
+      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
 
@@ -137,35 +145,72 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Execute", on => me.target, ret => this.hasTalent("Deep Wounds")),
 
       // Slam to fill
-      spell.cast("Slam", on => me.target, ret => this.shouldSlam()),
-
-      // AoE execute phase
-      this.aoeRotation()
+      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
 
-  aoeRotation() {
+  // 2 targets: Sweeping Strikes + single target rotation
+  sweepingStrikesRotation() {
     return new bt.Selector(
-      // AoE Rend
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRendAoE()),
+      // Apply/refresh Rend on target
+      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
-      // Sweeping Strikes for AoE
+      // Cast Sweeping Strikes if not active
       spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
 
-      // Ravager
-      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavagerAoE()),
-
-      // Avatar
+      // Burst cooldowns
+      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavager()),
       spell.cast("Avatar", ret => this.shouldCastAvatar()),
-
-      // Colossus Smash
       spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
+      spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
+
+      // Demolish during Colossus Smash
+      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
+
+      // Heroic Strike
+      spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
+
+      // Mortal Strike - cleaves to second target via Sweeping Strikes
+      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
+
+      // Overpower
+      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
+
+      // Mortal Strike fallback
+      spell.cast("Mortal Strike", on => me.target),
+
+      // Execute during Sudden Death
+      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
+
+      // Slam to fill
+      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
+    );
+  }
+
+  // 3+ targets: Cleave-focused AoE rotation
+  aoeCleaveRotation() {
+    return new bt.Selector(
+      // Apply/refresh Rend
+      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
+
+      // Cast Sweeping Strikes if not active
+      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
+
+      // Burst cooldowns
+      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavagerAoE()),
+      spell.cast("Avatar", ret => this.shouldCastAvatar()),
+      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
+      spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
+
+      // Collateral Damage buff: prioritize Cleave (75% increased damage)
+      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.shouldCastCleave()),
+      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
 
       // Demolish
       spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishAoE()),
 
-      // Cleave
-      spell.cast("Cleave", on => me.target, ret => this.getEnemiesInRange(8) >= 2),
+      // Cleave - main focus for 3+ targets
+      spell.cast("Cleave", on => me.target, ret => this.shouldCastCleave()),
 
       // Mortal Strike
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
@@ -176,8 +221,8 @@ export class WarriorArmsPVE extends Behavior {
       // Execute during Sudden Death
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
-      // Thunder Clap for AoE (if no other abilities)
-      spell.cast("Thunder Clap", on => me.target, ret => this.getEnemiesInRange(8) >= 3)
+      // Thunder Clap filler
+      spell.cast("Thunder Clap", on => me.target, ret => this.shouldCastThunderClap())
     );
   }
 
@@ -310,6 +355,24 @@ export class WarriorArmsPVE extends Behavior {
     if (!spell.isSpellKnown("Sweeping Strikes")) return false;
     if (me.hasAura(auras.sweepingStrikes)) return false;
     return this.getEnemiesInRange(8) >= 2;
+  }
+
+  shouldCastCleave() {
+    if (!spell.isSpellKnown("Cleave")) return false;
+    return this.getEnemiesInRange(8) >= 3;
+  }
+
+  shouldCastThunderClap() {
+    if (!spell.isSpellKnown("Thunder Clap")) return false;
+    return this.getEnemiesInRange(8) >= 3;
+  }
+
+  hasCollateralDamage() {
+    return me.getAuraStacks(auras.collateralDamage) >= 3;
+  }
+
+  hasCollateralDamageStacks() {
+    return me.getAuraStacks(auras.collateralDamage);
   }
 
   shouldExecute() {
