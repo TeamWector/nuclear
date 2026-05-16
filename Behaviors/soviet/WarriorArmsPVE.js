@@ -382,8 +382,8 @@ export class WarriorArmsPVE extends Behavior {
 
   shouldSlam() {
     if (!spell.isSpellKnown("Slam")) return false;
-    // Slam as filler, don't waste if we have better options
-    return me.powerByType(PowerType.Rage) >= 30;
+    // Slam as filler - only when we have excess rage
+    return me.powerByType(PowerType.Rage) >= 60;
   }
 
   hasCooldownsReady() {
