@@ -200,11 +200,11 @@ export class WarriorArmsPVE extends Behavior {
   // 3+ targets: Cleave-focused AoE rotation (per method.gg research)
   aoeCleaveRotation() {
     return new bt.Selector(
+      // Cast Sweeping Strikes if not active (helps cleave to extra targets)
+      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
+
       // Apply/refresh Rend
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Cast Sweeping Strikes if not active
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
 
       // Burst cooldowns
       spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavagerAoE()),
