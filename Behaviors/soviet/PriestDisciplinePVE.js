@@ -131,6 +131,16 @@ export class PriestDiscipline extends Behavior {
       spell.cast("Power Word: Shield", on => this.getShieldPriorityTarget(), ret =>
         this.getShieldPriorityTarget() !== undefined),
 
+      // Surge of Light procs -- Shadow Mend takes priority (more powerful)
+      spell.cast("Shadow Mend", on => this.healTarget, ret =>
+        this.healTarget?.effectiveHealthPercent < 80
+        && me.hasAura(auras.shadowMend)
+        && me.hasAura(auras.surgeOfLight)),
+      spell.cast("Flash Heal", on => this.healTarget, ret =>
+        this.healTarget?.effectiveHealthPercent < 80
+        && me.hasAura(auras.surgeOfLight)
+        && !me.hasAura(auras.shadowMend)),
+
       // =====================================================
       // CORE DAMAGE PRIORITY (Oracle) -- healing via Atonement
       // =====================================================
@@ -166,16 +176,6 @@ export class PriestDiscipline extends Behavior {
       // =====================================================
       // HEALING WEAVE -- procs, atonement, direct heals mixed in
       // =====================================================
-
-      // Surge of Light procs -- Shadow Mend takes priority (more powerful)
-      spell.cast("Shadow Mend", on => this.healTarget, ret =>
-        this.healTarget?.effectiveHealthPercent < 85
-        && me.hasAura(auras.shadowMend)
-        && me.hasAura(auras.surgeOfLight)),
-      spell.cast("Flash Heal", on => this.healTarget, ret =>
-        this.healTarget?.effectiveHealthPercent < 85
-        && me.hasAura(auras.surgeOfLight)
-        && !me.hasAura(auras.shadowMend)),
 
       // Plea: raid-style atonement touch-up; rarely used in Mythic+
       spell.cast("Plea", on => this.healTarget, ret =>
