@@ -19,6 +19,7 @@ const auras = {
   avatar: 107574,
   mortalWounds: 115804,
   collateralDamage: 334783,
+  executionersPrecision: 386633,
 };
 
 const spells = {
@@ -95,11 +96,20 @@ export class WarriorArmsPVE extends Behavior {
       // Rend upkeep - refresh when < 4 seconds remaining
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
+      // Avatar (per method.gg - timing is critical)
+      spell.cast("Avatar", ret => this.shouldCastAvatar()),
+
+      // Colossus Smash
+      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
+
       // Demolish during Colossus Smash (Colossus build)
       spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
 
-      // Heroic Strike
+      // Heroic Strike (Apex proc) - high priority
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
+
+      // Execute during Sudden Death - before Mortal Strike
+      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
       // Mortal Strike - keep on cooldown
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
@@ -110,10 +120,7 @@ export class WarriorArmsPVE extends Behavior {
       // Mortal Strike fallback
       spell.cast("Mortal Strike", on => me.target),
 
-      // Execute during Sudden Death
-      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
-
-      // Slam to fill
+      // Slam to fill - only at high rage
       spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
@@ -123,28 +130,31 @@ export class WarriorArmsPVE extends Behavior {
       // Rend upkeep
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
-      // Demolish during Colossus Smash with 10 stacks
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishExecute()),
-
-      // Heroic Strike
+      // Heroic Strike (Apex proc) - top priority in execute
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
 
-      // Mortal Strike
-      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
+      // Demolish during Colossus Smash with 10 stacks
+      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishExecute()),
 
       // Execute during Sudden Death
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
-      // Execute
+      // Mortal Strike (at 2 stacks Executioner's Precision)
+      spell.cast("Mortal Strike", on => me.target, ret => this.getExecutionersPrecisionStacks() === 2),
+
+      // Execute (when rage > 70 or no Executioner's Precision stacks)
+      spell.cast("Execute", on => me.target, ret => this.shouldExecute() && (me.powerByType(PowerType.Rage) >= 70 || this.getExecutionersPrecisionStacks() < 2)),
+
+      // Overpower (when rage < 70)
+      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower() && me.powerByType(PowerType.Rage) < 70),
+
+      // Mortal Strike
+      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
+
+      // Execute (fallback)
       spell.cast("Execute", on => me.target, ret => this.shouldExecute()),
 
-      // Overpower
-      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
-
-      // Execute if Deep Wounds talented (Deep Wounds deals extra execute damage)
-      spell.cast("Execute", on => me.target, ret => this.hasTalent("Deep Wounds")),
-
-      // Slam to fill
+      // Slam to fill - only at high rage
       spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
@@ -187,7 +197,7 @@ export class WarriorArmsPVE extends Behavior {
     );
   }
 
-  // 3+ targets: Cleave-focused AoE rotation
+  // 3+ targets: Cleave-focused AoE rotation (per method.gg research)
   aoeCleaveRotation() {
     return new bt.Selector(
       // Apply/refresh Rend
@@ -202,17 +212,17 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
       spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
 
-      // Collateral Damage buff: prioritize Cleave (75% increased damage)
+      // Demolish during Colossus Smash - HIGH priority
+      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishAoE()),
+
+      // Collateral Damage buff: prioritize Cleave (75% increased damage at 3 stacks)
       spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.shouldCastCleave()),
       spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
 
-      // Demolish
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishAoE()),
-
-      // Cleave - main focus for 3+ targets
+      // Cleave - main AoE spam for 3+ targets
       spell.cast("Cleave", on => me.target, ret => this.shouldCastCleave()),
 
-      // Mortal Strike
+      // Mortal Strike (Mortal Wounds now triggers from Mortal Strike and Slam per 12.0.5)
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
 
       // Overpower
@@ -221,8 +231,8 @@ export class WarriorArmsPVE extends Behavior {
       // Execute during Sudden Death
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
-      // Thunder Clap filler
-      spell.cast("Thunder Clap", on => me.target, ret => this.shouldCastThunderClap())
+      // Slam filler (also triggers Mortal Wounds per 12.0.5)
+      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
 
@@ -362,17 +372,12 @@ export class WarriorArmsPVE extends Behavior {
     return this.getEnemiesInRange(8) >= 3;
   }
 
-  shouldCastThunderClap() {
-    if (!spell.isSpellKnown("Thunder Clap")) return false;
-    return this.getEnemiesInRange(8) >= 3;
-  }
-
   hasCollateralDamage() {
     return me.getAuraStacks(auras.collateralDamage) >= 3;
   }
 
-  hasCollateralDamageStacks() {
-    return me.getAuraStacks(auras.collateralDamage);
+  getExecutionersPrecisionStacks() {
+    return me.getAuraStacks(auras.executionersPrecision);
   }
 
   shouldExecute() {
