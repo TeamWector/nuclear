@@ -20,6 +20,7 @@ const auras = {
   mortalWounds: 115804,
   collateralDamage: 334783,
   executionersPrecision: 386633,
+  masterOfWarfare: 1269394,
 };
 
 const spells = {
@@ -284,8 +285,7 @@ export class WarriorArmsPVE extends Behavior {
   }
 
   hasHeroicStrikeProc() {
-    if (!spell.isSpellKnown("Heroic Strike")) return false;
-    return me.hasAura("Heroic Strike") || me.hasAura("Improved Heroic Strike");
+    return me.hasAura(auras.masterOfWarfare);
   }
 
   shouldCastRend() {
@@ -386,8 +386,8 @@ export class WarriorArmsPVE extends Behavior {
   }
 
   shouldSlam() {
-    if (!spell.isSpellKnown("Slam")) return false;
     // Slam as filler - only when we have excess rage
+    // Note: Master of Warfare makes Slam become Heroic Strike automatically
     return me.powerByType(PowerType.Rage) >= 60;
   }
 
