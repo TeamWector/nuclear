@@ -6,129 +6,150 @@ import spell from "@/Core/Spell";
 import { me } from "@/Core/ObjectManager";
 import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
 import Settings from '@/Core/Settings';
-import KeyBinding from '@/Core/KeyBinding';
+import { CombatLogEventTypes } from '@/Enums/CombatLogEvents';
 
 const auras = {
-  soulFragments: 203981,
   demonSpikes: 203819,
+  soulFragments: 203981,
   fieryBrand: 207771,
-  metamorphosis: 187827,
 };
+
+const DAMAGE_EVENT_TYPES = new Set([
+  CombatLogEventTypes.SWING_DAMAGE,
+  CombatLogEventTypes.SWING_DAMAGE_LANDED,
+  CombatLogEventTypes.RANGE_DAMAGE,
+  CombatLogEventTypes.SPELL_DAMAGE,
+  CombatLogEventTypes.SPELL_PERIODIC_DAMAGE,
+  CombatLogEventTypes.SPELL_BUILDING_DAMAGE,
+  CombatLogEventTypes.ENVIRONMENTAL_DAMAGE,
+  CombatLogEventTypes.DAMAGE_SHIELD,
+  CombatLogEventTypes.DAMAGE_SPLIT,
+]);
 
 export class DemonHunterVengeanceBehavior extends Behavior {
   name = "Demon Hunter [Vengeance]";
   context = BehaviorContext.Any;
   specialization = Specialization.DemonHunter.Vengeance;
+
   static settings = [
-    {
-      header: "Utility",
-      options: [
-        { type: "checkbox", uid: "VengeanceUseMetamorphosis", text: "Use Metamorphosis offensively", default: true },
-        { type: "checkbox", uid: "VengeanceChaosNovaMultiCasters", text: "Use Chaos Nova on multiple casters", default: true },
-        { type: "hotkey", uid: "VengeanceInfernalStrikeUse", text: "Infernal Strike Toggle", default: null },
-        { type: "hotkey", uid: "VengeanceSigilOfSpiteUse", text: "Sigil of Spite Toggle", default: null },
-      ]
-    },
     {
       header: "Defensives",
       options: [
-        { type: "slider", uid: "VengeanceDemonSpikes2Charges", text: "Use Demon Spikes at 2 charges (HP %)", min: 1, max: 100, default: 95 },
-        { type: "slider", uid: "VengeanceDemonSpikes1Charge", text: "Use Demon Spikes at 1 charge (HP %)", min: 1, max: 100, default: 65 },
+        { type: "slider", uid: "VengeanceDefWindowMs", text: "Damage window (ms)", min: 1000, max: 8000, default: 4000 },
+        { type: "slider", uid: "VengeanceDemonSpikesPct", text: "Demon Spikes: % HP lost in window", min: 5, max: 60, default: 20 },
+        { type: "slider", uid: "VengeancePanicHpPct", text: "Panic HP% (force Demon Spikes)", min: 10, max: 80, default: 50 },
+      ]
+    },
+    {
+      header: "Rotation",
+      options: [
+        { type: "slider", uid: "VengeanceSpiritBombSoulsST", text: "Spirit Bomb min fragments (single target)", min: 3, max: 6, default: 5 },
+        { type: "slider", uid: "VengeanceSpiritBombSoulsAoE", text: "Spirit Bomb min fragments (AoE)", min: 3, max: 6, default: 4 },
+        { type: "slider", uid: "VengeanceFelDevastationFury", text: "Fel Devastation min Fury", min: 30, max: 60, default: 50 },
+        { type: "slider", uid: "VengeanceFelbladeFuryMax", text: "Felblade max Fury", min: 30, max: 90, default: 80 },
+        { type: "slider", uid: "VengeanceSigilOfSpiteMaxSouls", text: "Sigil of Spite max fragments", min: 0, max: 4, default: 2 },
       ]
     }
   ];
 
+  constructor() {
+    super();
+    this._damageEvents = [];
+    this._lastHp = null;
+
+    this._listener = new wow.EventListener();
+    this._listener.onEvent = (event) => this.onCombatLogEvent(event);
+  }
+
+  onCombatLogEvent(event) {
+    if (event.name !== "COMBAT_LOG_EVENT_UNFILTERED") return;
+    const eventData = event.args?.[0];
+    if (!eventData) return;
+    if (!DAMAGE_EVENT_TYPES.has(eventData.eventType)) return;
+
+    const destGuid = eventData.destination?.guid;
+    if (!destGuid || !me?.guid?.equals(destGuid)) return;
+
+    const hp = me.health;
+    if (this._lastHp === null) {
+      this._lastHp = hp;
+      return;
+    }
+    const drop = this._lastHp - hp;
+    this._lastHp = hp;
+    if (drop <= 0) return;
+
+    this._damageEvents.push({ t: wow.frameTime, amount: drop });
+  }
+
+  pruneDamageEvents() {
+    const windowMs = Settings.VengeanceDefWindowMs ?? 4000;
+    const cutoff = wow.frameTime - windowMs;
+    while (this._damageEvents.length && this._damageEvents[0].t < cutoff) {
+      this._damageEvents.shift();
+    }
+  }
+
+  damageTakenPctInWindow() {
+    const maxHp = me.maxHealth;
+    if (!maxHp) return 0;
+    let total = 0;
+    for (const hit of this._damageEvents) total += hit.amount;
+    return (total / maxHp) * 100;
+  }
+
   build() {
     return new bt.Selector(
+      new bt.Action(() => { this.pruneDamageEvents(); return bt.Status.Failure; }),
       common.waitForNotSitting(),
       common.waitForNotMounted(),
       common.waitForCastOrChannel(),
       new bt.Action(() => me.deadOrGhost ? bt.Status.Success : bt.Status.Failure),
 
-      // Off-GCD abilities — must be outside the GCD Decorator
       spell.cast("Torment", on => combat.targets.find(t => t.target && !t.isTanking())),
-      spell.cast("Demon Spikes", on => me, req => this.shouldUseDemonSpikes()),
       spell.interrupt("Disrupt"),
-      spell.cast("Infernal Strike", on => me.targetUnit, req => KeyBinding.isBehaviorHotkeyDown("VengeanceInfernalStrikeUse")),
+      spell.cast("Demon Spikes", on => me, req => this.shouldUseDemonSpikes()),
 
       new bt.Decorator(
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
-          spell.cast("Chaos Nova", on => me, req => this.shouldUseChaosNova()),
-          common.waitForCombat(),
           common.waitForTarget(),
+          common.waitForFacing(),
           common.ensureAutoAttack(),
 
-          // Metamorphosis — won't overcap duration, Spirit Bomb CD > 10s
-          spell.cast("Metamorphosis", on => me, req => this.shouldUseMetamorphosis()),
+          // Reactive silence — drop on a nearby interruptible caster
+          spell.cast("Sigil of Silence", on => this.castingEnemyInRange(8)),
 
-          // Fracture anti-cap at near 2 charges
-          spell.cast("Fracture", on => combat.bestTarget, req => spell.getCharges("Fracture") >= 2),
+          // Fiery Brand — apply if missing on best target, or about to cap charges
+          spell.cast("Fiery Brand", on => combat.bestTarget, req => this.shouldFieryBrand()),
 
-          // Spirit Bomb with 4+ Souls when Fiery Brand is about to expire
-          spell.cast("Spirit Bomb", on => me, req => {
-            return this.soulFragments() >= 4 && this.fieryBrandExpiring(combat.bestTarget);
-          }),
+          // Fel Devastation — AoE damage + self heal, channel only when stationary and facing
+          spell.cast("Fel Devastation", on => me, req => this.shouldFelDevastation()),
 
-          // Fiery Brand if debuff not active on target
-          spell.cast("Fiery Brand", on => combat.bestTarget, req => {
-            return combat.bestTarget && !combat.bestTarget.hasAuraByMe(auras.fieryBrand);
-          }),
+          // Sigil of Flame — drop on the tightest enemy cluster (8yd radius)
+          spell.cast("Sigil of Flame", on => this.bestAoeTarget(8) ?? combat.bestTarget, req => !me.isMoving()),
 
-          // Spirit Bomb at 6 Souls
-          spell.cast("Spirit Bomb", on => me, req => this.soulFragments() >= 6),
+          // Sigil of Spite — major fragment generator, drop on cluster when not capped on souls
+          spell.cast("Sigil of Spite", on => this.bestAoeTarget(8) ?? combat.bestTarget, req => this.shouldSigilOfSpite()),
 
-          // Immolation Aura
-          spell.cast("Immolation Aura", on => me, req => combat.bestTarget && me.isWithinMeleeRange(combat.bestTarget)),
+          spell.cast("Immolation Aura", on => me),
 
-          // Sigil of Flame
-          spell.cast("Sigil of Flame", on => combat.bestTarget),
+          // Spirit Bomb — soul spender, hard priority over Soul Cleave when fragments allow
+          spell.cast("Spirit Bomb", on => me, req => this.shouldSpiritBomb()),
 
-          // Sigil of Spite — hotkey or auto when won't overcap souls
-          spell.cast("Sigil of Spite", on => combat.bestTarget, req => {
-            if (KeyBinding.isBehaviorHotkeyDown("VengeanceSigilOfSpiteUse")) return true;
-            return this.soulFragments() <= 3;
-          }),
+          // Felblade — Fury generator + gap closer when below Fury cap
+          spell.cast("Felblade", on => combat.bestTarget, req => me.power <= (Settings.VengeanceFelbladeFuryMax ?? 80)),
 
-          // Fel Devastation at 50+ Fury, facing enemies, not moving
-          spell.cast("Fel Devastation", on => me, req => {
-            return me.power >= 50 && !me.isMoving() &&
-              combat.targets.some(t => me.isFacing(t, 90) && me.isWithinMeleeRange(t));
-          }),
+          // Soul Cleave — spend Fury when Spirit Bomb isn't pressable
+          spell.cast("Soul Cleave", on => combat.bestTarget, req => me.power >= 30),
 
-          // Soul Cleave to spend Fury and Souls
-          spell.cast("Soul Cleave", on => combat.bestTarget),
-
-          // Fracture if won't cap Fury or Souls
-          spell.cast("Fracture", on => combat.bestTarget, req => me.power <= 80 && this.soulFragments() <= 4),
-
-          // Felblade if won't cap Fury
-          spell.cast("Felblade", on => combat.bestTarget, req => me.power <= 80),
-
-          // Throw Glaive filler
+          // Builders
+          spell.cast("Fracture", on => combat.bestTarget),
+          spell.cast("Shear", on => combat.bestTarget),
           spell.cast("Throw Glaive", on => combat.bestTarget),
         )
       )
     );
-  }
-
-  shouldUseMetamorphosis() {
-    if (!Settings.VengeanceUseMetamorphosis) return false;
-    if (me.hasAura(auras.metamorphosis)) return false;
-    const spiritBombCD = spell.getCooldown("Spirit Bomb");
-    return spiritBombCD && spiritBombCD.timeleft > 10000;
-  }
-
-  fieryBrandExpiring(target) {
-    if (!target) return false;
-    const fb = target.getAuraByMe(auras.fieryBrand);
-    if (!fb) return false;
-    return fb.remaining > 0 && fb.remaining < 4000;
-  }
-
-  shouldUseChaosNova() {
-    if (!Settings.VengeanceChaosNovaMultiCasters) return false;
-    return combat.targets.filter(t => me.distanceTo(t) <= 10 && t.isCastingOrChanneling).length > 1;
   }
 
   soulFragments() {
@@ -136,14 +157,70 @@ export class DemonHunterVengeanceBehavior extends Behavior {
     return aura ? aura.stacks : 0;
   }
 
+  meleeTargetCount() {
+    return combat.targets.filter(t => me.isWithinMeleeRange(t)).length;
+  }
+
+  bestAoeTarget(radius) {
+    let best = null;
+    let bestCount = 0;
+    for (const t of combat.targets) {
+      const count = combat.getUnitsAroundUnit(t, radius).length;
+      if (count > bestCount) {
+        bestCount = count;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  castingEnemyInRange(range) {
+    return combat.targets.find(t =>
+      t.isCastingOrChanneling && t.isInterruptible && me.distanceTo(t) <= range
+    );
+  }
+
+  shouldFieryBrand() {
+    const target = combat.bestTarget;
+    if (!target) return false;
+    if (target.hasAuraByMe(auras.fieryBrand)) return false;
+    if (!me.isWithinMeleeRange(target)) return false;
+    return true;
+  }
+
+  shouldFelDevastation() {
+    if (me.power < (Settings.VengeanceFelDevastationFury ?? 50)) return false;
+    if (me.isMoving()) return false;
+    return combat.targets.some(t => me.isFacing(t, 90) && me.isWithinMeleeRange(t));
+  }
+
+  shouldSigilOfSpite() {
+    if (me.isMoving()) return false;
+    if (!combat.bestTarget) return false;
+    const maxSouls = Settings.VengeanceSigilOfSpiteMaxSouls ?? 2;
+    return this.soulFragments() <= maxSouls;
+  }
+
+  shouldSpiritBomb() {
+    const souls = this.soulFragments();
+    const meleeCount = this.meleeTargetCount();
+    const minST = Settings.VengeanceSpiritBombSoulsST ?? 5;
+    const minAoE = Settings.VengeanceSpiritBombSoulsAoE ?? 4;
+    if (meleeCount >= 2) return souls >= minAoE;
+    return souls >= minST;
+  }
+
   shouldUseDemonSpikes() {
-    if (me.hasAura(auras.demonSpikes)) return false;
+    if (!me.inCombat()) return false;
+    if (!combat.targets.some(t => me.isWithinMeleeRange(t))) return false;
 
-    const hasNearbyEnemies = combat.targets.some(unit => me.isWithinMeleeRange(unit));
-    if (!hasNearbyEnemies) return false;
+    const ds = me.getAura(auras.demonSpikes);
+    const refreshable = !ds || ds.remaining < 2000;
+    if (!refreshable) return false;
 
-    const charges = spell.getCharges("Demon Spikes");
-    if (charges === 2 && me.pctHealth <= Settings.VengeanceDemonSpikes2Charges) return true;
-    return charges === 1 && me.pctHealth <= Settings.VengeanceDemonSpikes1Charge;
+    const dmgPct = this.damageTakenPctInWindow();
+    const threshold = Settings.VengeanceDemonSpikesPct ?? 20;
+    const panicHp = Settings.VengeancePanicHpPct ?? 50;
+    return dmgPct >= threshold || me.pctHealth <= panicHp;
   }
 }
