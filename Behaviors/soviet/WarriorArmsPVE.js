@@ -47,6 +47,7 @@ export class WarriorArmsPVE extends Behavior {
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
           this.battleShout(),
+          spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
           new bt.Decorator(
             ret => this.hasCooldownsReady(),
             this.burstCooldowns()
@@ -80,15 +81,6 @@ export class WarriorArmsPVE extends Behavior {
     return new bt.Selector(
       // Sweeping Strikes (2 targets)
       spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
-
-      // Rend upkeep
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Avatar
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
-
-      // Colossus Smash
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
 
       // Demolish - during Smash (Colossus build)
       spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
@@ -128,15 +120,6 @@ export class WarriorArmsPVE extends Behavior {
     return new bt.Selector(
       // Sweeping Strikes (2 targets in AOE)
       spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
-
-      // Rend upkeep
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Avatar
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
-
-      // Colossus Smash
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
 
       // Demolish - during Smash (Colossus build)
       spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
