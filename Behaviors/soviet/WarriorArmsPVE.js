@@ -73,27 +73,22 @@ export class WarriorArmsPVE extends Behavior {
   }
 
   mainRotation() {
-    const enemyCount = this.getEnemiesInRange(8);
-
-    // 3+ targets: Cleave-focused AoE rotation
-    if (enemyCount >= 3) {
-      return this.aoeCleaveRotation();
+    // 3+ targets: AoE rotation
+    if (this.isAoE()) {
+      return this.aoeRotation();
     }
-
-    // 2 targets: Sweeping Strikes + single target rotation
-    if (enemyCount === 2) {
-      return this.sweepingStrikesRotation();
-    }
-
-    // Single target
+    // Execute phase
     if (this.isExecutePhase()) {
       return this.executeRotation();
     }
+    // Single target
     return this.normalRotation();
   }
 
   normalRotation() {
     return new bt.Selector(
+      // Sweeping Strikes (2 targets)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
       // Rend upkeep - refresh when < 4 seconds remaining
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
@@ -128,6 +123,8 @@ export class WarriorArmsPVE extends Behavior {
 
   executeRotation() {
     return new bt.Selector(
+      // Sweeping Strikes (2 targets)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
       // Rend upkeep
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
@@ -160,14 +157,14 @@ export class WarriorArmsPVE extends Behavior {
     );
   }
 
-  // 2 targets: Sweeping Strikes + single target rotation
-  sweepingStrikesRotation() {
+  // 2+ targets: AoE rotation with SS + optional Cleave spam
+  aoeRotation() {
     return new bt.Selector(
-      // Apply/refresh Rend on target
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Cast Sweeping Strikes if not active
+      // Sweeping Strikes (only 2 targets, not AoE Cleave range)
       spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
+
+      // Apply/refresh Rend
+      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
 
       // Burst cooldowns
       spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavager()),
@@ -175,50 +172,15 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
       spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
 
-      // Demolish during Colossus Smash
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
-
-      // Heroic Strike
-      spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
-
-      // Mortal Strike - cleaves to second target via Sweeping Strikes
-      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
-
-      // Overpower
-      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
-
-      // Mortal Strike fallback
-      spell.cast("Mortal Strike", on => me.target),
-
-      // Execute during Sudden Death
-      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
-
-      // Slam to fill
-      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
-    );
-  }
-
-  // 3+ targets: Cleave-focused AoE rotation (per method.gg research)
-  aoeCleaveRotation() {
-    return new bt.Selector(
-      // Cast Sweeping Strikes if not active (helps cleave to extra targets)
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
-
-      // Apply/refresh Rend
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Burst cooldowns
-      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavagerAoE()),
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
-      spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
-
       // Demolish during Colossus Smash - HIGH priority
       spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishAoE()),
 
+      // Heroic Strike (Master of Warfare) - MoW makes Slam become HS
+      spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
+
       // Collateral Damage buff: prioritize Cleave (75% increased damage at 3 stacks)
-      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.shouldCastCleave()),
-      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
+      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.isAoE()),
+      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && this.isAoE() && spell.isSpellKnown("Whirlwind")),
 
       // Cleave - main AoE spam for 3+ targets
       spell.cast("Cleave", on => me.target, ret => this.shouldCastCleave()),
@@ -362,14 +324,12 @@ export class WarriorArmsPVE extends Behavior {
   }
 
   shouldCastSweepingStrikes() {
-    if (!spell.isSpellKnown("Sweeping Strikes")) return false;
     if (me.hasAura(auras.sweepingStrikes)) return false;
-    return this.getEnemiesInRange(8) >= 2;
+    return this.isAoE();
   }
 
   shouldCastCleave() {
-    if (!spell.isSpellKnown("Cleave")) return false;
-    return this.getEnemiesInRange(8) >= 3;
+    return this.isAoE();
   }
 
   hasCollateralDamage() {
@@ -393,10 +353,6 @@ export class WarriorArmsPVE extends Behavior {
 
   hasCooldownsReady() {
     return Combat.burstToggle && me.target && me.isWithinMeleeRange(me.target);
-  }
-
-  getEnemiesInRange(range) {
-    return me.getUnitsAroundCount(range);
   }
 
   getCurrentTarget() {
