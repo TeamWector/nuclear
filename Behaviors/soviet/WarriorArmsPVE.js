@@ -161,7 +161,7 @@ export class WarriorArmsPVE extends Behavior {
   aoeRotation() {
     return new bt.Selector(
       // Sweeping Strikes (only 2 targets)
-      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
+      spell.cast("Sweeping Strikes"),
 
       // Apply/refresh Rend
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
