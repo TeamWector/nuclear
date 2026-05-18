@@ -160,8 +160,8 @@ export class WarriorArmsPVE extends Behavior {
   // 2+ targets: AoE rotation with SS + optional Cleave spam
   aoeRotation() {
     return new bt.Selector(
-      // Sweeping Strikes (only 2 targets, not AoE Cleave range)
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
+      // Sweeping Strikes (only 2 targets)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
 
       // Apply/refresh Rend
       spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
@@ -179,11 +179,11 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
 
       // Collateral Damage buff: prioritize Cleave (75% increased damage at 3 stacks)
-      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.isAoE()),
-      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && this.isAoE() && spell.isSpellKnown("Whirlwind")),
+      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && me.getEnemies(8).length >= 3),
+      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && me.getEnemies(8).length >= 3 && spell.isSpellKnown("Whirlwind")),
 
       // Cleave - main AoE spam for 3+ targets
-      spell.cast("Cleave", on => me.target, ret => this.shouldCastCleave()),
+      spell.cast("Cleave", on => me.target, ret => me.getEnemies(8).length >= 3),
 
       // Mortal Strike (Mortal Wounds now triggers from Mortal Strike and Slam per 12.0.5)
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
