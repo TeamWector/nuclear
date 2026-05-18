@@ -51,7 +51,11 @@ export class WarriorArmsPVE extends Behavior {
             ret => this.hasCooldownsReady(),
             this.burstCooldowns()
           ),
-          this.mainRotation()
+          new bt.Decorator(
+            ret => this.isAoE(),
+            this.aoeRotation()
+          ),
+          this.singleTargetRotation()
         )
       )
     );
@@ -72,7 +76,7 @@ export class WarriorArmsPVE extends Behavior {
     );
   }
 
-  mainRotation() {
+  singleTargetRotation() {
     return new bt.Selector(
       // Sweeping Strikes (2 targets)
       spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
@@ -89,9 +93,6 @@ export class WarriorArmsPVE extends Behavior {
       // Demolish - during Smash (Colossus build)
       spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
 
-      // Demolish Execute - 10 stacks (execute phase)
-      spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff() && this.colossalMightStacks() >= 10 && this.isExecutePhase()),
-
       // Heroic Strike (Master of Warfare)
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
 
@@ -99,10 +100,15 @@ export class WarriorArmsPVE extends Behavior {
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
       // Execute phase priority
-      spell.cast("Mortal Strike", on => me.target, ret => this.isExecutePhase() && this.getExecutionersPrecisionStacks() === 2),
-      spell.cast("Execute", on => me.target, ret => this.isExecutePhase() && this.shouldExecute() && (me.powerByType(PowerType.Rage) >= 70 || this.getExecutionersPrecisionStacks() < 2)),
-      spell.cast("Overpower", on => me.target, ret => this.isExecutePhase() && this.shouldCastOverpower() && me.powerByType(PowerType.Rage) < 70),
-      spell.cast("Execute", on => me.target, ret => this.isExecutePhase() && this.shouldExecute()),
+      new bt.Decorator(
+        ret => this.isExecutePhase(),
+        new bt.Selector(
+          spell.cast("Mortal Strike", on => me.target, ret => this.getExecutionersPrecisionStacks() === 2),
+          spell.cast("Execute", on => me.target, ret => this.shouldExecute() && (me.powerByType(PowerType.Rage) >= 70 || this.getExecutionersPrecisionStacks() < 2)),
+          spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower() && me.powerByType(PowerType.Rage) < 70),
+          spell.cast("Execute", on => me.target, ret => this.shouldExecute()),
+        )
+      ),
 
       // Mortal Strike (Colossus build)
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
@@ -110,15 +116,49 @@ export class WarriorArmsPVE extends Behavior {
       // Overpower
       spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
 
-      // Collateral Damage Cleave (AoE)
-      spell.cast("Cleave", on => me.target, ret => this.isAoE() && this.hasCollateralDamage()),
-      spell.cast("Whirlwind", on => me.target, ret => this.isAoE() && this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
-
-      // Cleave spam (AoE 3+)
-      spell.cast("Cleave", on => me.target, ret => this.isAoE()),
-
       // Mortal Strike fallback
       spell.cast("Mortal Strike", on => me.target),
+
+      // Slam filler
+      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
+    );
+  }
+
+  aoeRotation() {
+    return new bt.Selector(
+      // Sweeping Strikes (2 targets in AOE)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
+
+      // Rend upkeep
+      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
+
+      // Avatar
+      spell.cast("Avatar", ret => this.shouldCastAvatar()),
+
+      // Colossus Smash
+      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
+
+      // Demolish - during Smash (Colossus build)
+      spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
+
+      // Heroic Strike (Master of Warfare)
+      spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
+
+      // Execute Sudden Death
+      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
+
+      // Collateral Damage Cleave
+      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage()),
+      spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
+
+      // Cleave spam
+      spell.cast("Cleave", on => me.target),
+
+      // Mortal Strike (Colossus build)
+      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
+
+      // Overpower
+      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
 
       // Slam filler
       spell.cast("Slam", on => me.target, ret => this.shouldSlam())
