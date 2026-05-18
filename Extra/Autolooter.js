@@ -51,8 +51,6 @@ class Autolooter {
 
     if (Settings.ExtraIgnoreEnemies === true) return true;
 
-    if (me.inCombat()) return false;
-
     if (!combat.targets || combat.targets.length === 0) return true;
 
     return combat.getUnitsAroundUnit(me, 12).length === 0;
