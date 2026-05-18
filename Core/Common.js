@@ -64,6 +64,24 @@ class Common {
     }, "Wait for facing");
   }
 
+  /**
+   * Blocks lower-priority siblings in a {@link bt.Selector} while the player is not within
+   * melee range of {@link me.targetUnit}. Semantics match the other `waitFor*` helpers:
+   * returns Success while the "wait" condition holds (no target or out of melee), Failure
+   * when the player is in melee and a melee cast may proceed.
+   */
+  static waitForMelee() {
+    return new bt.Action(() => {
+      if (!me.targetUnit || !Common.validTarget(me.targetUnit)) {
+        return bt.Status.Success;
+      }
+      if (!me.isWithinMeleeRange(me.targetUnit)) {
+        return bt.Status.Success;
+      }
+      return bt.Status.Failure;
+    }, "Wait for melee range");
+  }
+
   static validTarget(u) {
     if (!u || u.deadOrGhost || !me.canAttack(u)) {
       return false;
