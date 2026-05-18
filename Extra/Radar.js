@@ -302,8 +302,7 @@ class Radar {
         objects.forEach(obj => trackedObjects.add(obj));
         this.drawObjects(objects, objectColors[cat.type], cat.draw);
 
-        // Update closest object if lines are being drawn for this category
-        if (Settings[cat.draw] && objects.length > 0) {
+        if (objects.length > 0) {
           const distance = me.distanceTo(objects[0].position);
           if (distance < closestDistance) {
             closestDistance = distance;
@@ -319,8 +318,7 @@ class Radar {
       newObjects.forEach(obj => trackedObjects.add(obj));
       this.drawObjects(newObjects, objectColors.default, "ExtraRadarDrawLinesEverything");
 
-      // Update closest object if lines are being drawn for everything
-      if (Settings.ExtraRadarDrawLinesEverything && newObjects.length > 0) {
+      if (newObjects.length > 0) {
         const distance = me.distanceTo(newObjects[0].position);
         if (distance < closestDistance) {
           closestDistance = distance;
@@ -347,6 +345,7 @@ class Radar {
 
     if (Settings.ExtraRadarInteractTracked && !me.currentCastOrChannel) {
       for (const obj of trackedObjects) {
+        if (!(obj instanceof wow.CGGameObject)) continue;
         if (me.withinInteractRange(obj) && !me.isMoving()) {
           obj.interact();
           break;
