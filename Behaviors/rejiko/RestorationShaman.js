@@ -153,9 +153,25 @@ export class ShamanRestorationBehavior extends Behavior {
       },
       new bt.Selector(
         common.waitForFacing(),
-        spell.cast("Chain Lightning", on => combat.bestTarget, req => combat.targets.length >= 2),
+        spell.cast("Chain Lightning", on => this.chainLightningTarget()),
         spell.cast("Lightning Bolt", on => combat.bestTarget)
       )
     );
+  }
+
+  chainLightningTarget() {
+    let best = null;
+    let bestCount = 0;
+    for (const u of combat.targets) {
+      let count = 0;
+      for (const other of combat.targets) {
+        if (u.distanceTo(other) <= 10) count++;
+      }
+      if (count > bestCount) {
+        best = u;
+        bestCount = count;
+      }
+    }
+    return bestCount >= 2 ? best : null;
   }
 }
