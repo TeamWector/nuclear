@@ -15,6 +15,28 @@ const objectColors = {
   default: colors.white
 };
 
+const CATEGORY_TRACK = {
+  quests: "ExtraRadarTrackQuests",
+  herbs: "ExtraRadarTrackHerbs",
+  ores: "ExtraRadarTrackOres",
+  treasures: "ExtraRadarTrackTreasures",
+  rares: "ExtraRadarTrackRares",
+  everything: "ExtraRadarTrackEverything",
+};
+
+const CATEGORY_DRAW = {
+  quests: "ExtraRadarDrawLinesQuests",
+  herbs: "ExtraRadarDrawLinesHerbs",
+  ores: "ExtraRadarDrawLinesOres",
+  treasures: "ExtraRadarDrawLinesTreasures",
+  rares: "ExtraRadarDrawLinesRares",
+  everything: "ExtraRadarDrawLinesEverything",
+};
+
+const CATEGORY_ORDER = ['quests', 'herbs', 'ores', 'treasures', 'rares'];
+
+const cmpDist = (a, b) => a.distSqr - b.distSqr;
+
 class Radar {
   static options = [
     { type: "checkbox", uid: "ExtraRadar", text: "Enable Radar", default: false },
@@ -56,73 +78,75 @@ class Radar {
     ]);
   }
 
-  static getFilteredAndSortedObjects(filterCondition) {
-    const validObjects = [];
+  static collectAndClassify() {
+    const loadDistance = Settings.ExtraRadarLoadDistance;
+    const loadDistanceSqr = loadDistance * loadDistance;
+    const mePos = me.position;
+    const meX = mePos.x, meY = mePos.y, meZ = mePos.z;
+
+    const buckets = {
+      quests: [], herbs: [], ores: [], treasures: [], rares: [], everything: []
+    };
+
     objMgr.objects.forEach(obj => {
-      if (filterCondition(obj) && this.withinDistance(obj) && obj.isInteractable) {
-        validObjects.push(obj);
+      if (obj === me) return;
+      if (!obj.isInteractable) return;
+
+      const p = obj.position;
+      if (!p) return;
+      const dx = p.x - meX;
+      const dy = p.y - meY;
+      const distSqr2D = dx * dx + dy * dy;
+      if (distSqr2D > loadDistanceSqr) return;
+      const dz = p.z - meZ;
+      const distSqr = distSqr2D + dz * dz;
+
+      const entry = { obj, distSqr, distSqr2D, screenPos: null, isOffScreen: false, drawn: false };
+
+      if (obj instanceof wow.CGUnit) {
+        if (obj.isRelatedToActiveQuest) buckets.quests.push(entry);
+        else if (obj.classification == Classification.Rare && !obj.deadOrGhost) buckets.rares.push(entry);
+        else buckets.everything.push(entry);
+      } else if (obj instanceof wow.CGGameObject) {
+        if (Gatherables.herb[obj.entryId]) buckets.herbs.push(entry);
+        else if (Gatherables.ore[obj.entryId]) buckets.ores.push(entry);
+        else if (Gatherables.treasure[obj.entryId]) buckets.treasures.push(entry);
+        else if (obj.isLootable) buckets.quests.push(entry);
+        else buckets.everything.push(entry);
+      } else if (obj instanceof wow.CGObject) {
+        buckets.everything.push(entry);
       }
     });
-    return validObjects.sort((a, b) => me.distanceTo(a.position) - me.distanceTo(b.position));
+
+    return buckets;
   }
 
-  static drawObjects(objects, color, drawLinesSetting) {
+  static drawObjects(entries, color, drawLinesSetting) {
+    if (entries.length === 0) return;
     const canvas = imgui.getBackgroundDrawList();
     const mePos = wow.WorldFrame.getScreenCoordinates(me.position);
+    const drawLines = Settings[drawLinesSetting];
 
-    objects.forEach(obj => {
-      const objPos = wow.WorldFrame.getScreenCoordinates(obj.position);
-      if (objPos != undefined && objPos.x !== -1) {
-        // On-screen object
-        if (Settings[drawLinesSetting]) {
-          canvas.addLine(mePos, objPos, color, 1);
-        }
-        this.drawObjectText(obj, objPos);
+    for (const entry of entries) {
+      const obj = entry.obj;
+      const op = obj.position;
+      const adjustedPos = new Vector3(op.x, op.y, op.z + obj.displayHeight + 0.1);
+      const screenPos = wow.WorldFrame.getScreenCoordinates(adjustedPos);
+      entry.drawn = true;
+      if (screenPos === undefined || screenPos.x === -1) {
+        entry.isOffScreen = true;
+        continue;
       }
-    });
-  }
-
-  static drawOffScreenObjects(objects) {
-    const canvas = imgui.getBackgroundDrawList();
-    const maxLines = 5;
-    const headerText = "OFF SCREEN";
-
-    const headerColor = colors.white;
-    const separatorColor = colors.white;
-
-    const offScreenObjects = objects.filter(obj => wow.WorldFrame.getScreenCoordinates(obj.position).x === -1);
-
-    if (offScreenObjects.length > 0) {
-      const headerWorldPos = new Vector3(me.position.x, me.position.y, me.position.z + me.displayHeight + 1);
-      const headerScreenPos = wow.WorldFrame.getScreenCoordinates(headerWorldPos);
-
-      const uniqueObjects = new Map();
-      offScreenObjects.forEach(obj => {
-        const key = `${obj.name}-${obj.entryId}`;
-        if (!uniqueObjects.has(key) || me.distanceTo(obj.position) < me.distanceTo(uniqueObjects.get(key).position)) {
-          uniqueObjects.set(key, obj);
-        }
-      });
-
-      const sortedObjects = Array.from(uniqueObjects.values())
-        .sort((a, b) => me.distanceTo(a.position) - me.distanceTo(b.position))
-        .slice(0, maxLines);
-
-      let text = `${headerText}\n${'_'.repeat(20)}\n`;
-      sortedObjects.forEach(obj => {
-        const distance = Math.round(me.distanceTo(obj.position));
-        text += `${obj.name} (${distance}y)\n`;
-      });
-
-      if (uniqueObjects.size > maxLines) {
-        text += `... and ${uniqueObjects.size - maxLines} more`;
+      entry.screenPos = screenPos;
+      if (drawLines) {
+        canvas.addLine(mePos, screenPos, color, 1);
       }
-
-      canvas.addText(text, headerScreenPos, headerColor);
+      this.drawObjectText(entry, screenPos);
     }
   }
 
-  static drawObjectText(obj, objPos) {
+  static drawObjectText(entry, screenPos) {
+    const obj = entry.obj;
     let prefix = '';
     let prefixColor = colors.white;
     if (obj instanceof wow.CGGameObject) {
@@ -152,26 +176,50 @@ class Radar {
 
     let text = `${obj.name}`;
     if (Settings.ExtraRadarDrawDistance) {
-      const distance = Math.round(me.distanceTo2D(obj.position));
-      text += ` (${distance}y)`;
+      text += ` (${Math.round(Math.sqrt(entry.distSqr2D))}y)`;
     }
     if (Settings.ExtraRadarDrawDebug) {
       text += ` [ID: ${obj.entryId}]`;
     }
 
     const canvas = imgui.getBackgroundDrawList();
-    const adjustedObjPos = new Vector3(obj.position.x, obj.position.y, obj.position.z + obj.displayHeight + 0.1);
-    const screenPos = wow.WorldFrame.getScreenCoordinates(adjustedObjPos);
-
+    const pos = { x: screenPos.x, y: screenPos.y };
     if (prefix) {
-      canvas.addText(prefix, screenPos, prefixColor);
-      screenPos.x += imgui.calcTextSize(prefix).x;
+      canvas.addText(prefix, pos, prefixColor);
+      pos.x += imgui.calcTextSize(prefix).x;
     }
-    canvas.addText(text, screenPos, colors.white);
+    canvas.addText(text, pos, colors.white);
   }
 
-  static withinDistance(obj) {
-    return me.distanceTo2D(obj.position) <= Settings.ExtraRadarLoadDistance;
+  static drawOffScreenObjects(allEntries) {
+    const maxLines = 5;
+    const uniqueObjects = new Map();
+    for (const entry of allEntries) {
+      if (!entry.isOffScreen) continue;
+      const obj = entry.obj;
+      const key = `${obj.name}-${obj.entryId}`;
+      const existing = uniqueObjects.get(key);
+      if (!existing || entry.distSqr < existing.distSqr) {
+        uniqueObjects.set(key, entry);
+      }
+    }
+    if (uniqueObjects.size === 0) return;
+
+    const headerWorldPos = new Vector3(me.position.x, me.position.y, me.position.z + me.displayHeight + 1);
+    const headerScreenPos = wow.WorldFrame.getScreenCoordinates(headerWorldPos);
+    const canvas = imgui.getBackgroundDrawList();
+
+    const sorted = Array.from(uniqueObjects.values()).sort(cmpDist).slice(0, maxLines);
+
+    let text = `OFF SCREEN\n${'_'.repeat(20)}\n`;
+    for (const entry of sorted) {
+      text += `${entry.obj.name} (${Math.round(Math.sqrt(entry.distSqr))}y)\n`;
+    }
+    if (uniqueObjects.size > maxLines) {
+      text += `... and ${uniqueObjects.size - maxLines} more`;
+    }
+
+    canvas.addText(text, headerScreenPos, colors.white);
   }
 
   static decodeFlags(value, flagsObj) {
@@ -267,86 +315,48 @@ class Radar {
 
     if (!Settings.ExtraRadar) return;
 
-    const trackedObjects = new Set();
-    let closestTrackedObject = null;
-    let closestDistance = Infinity;
+    const buckets = this.collectAndClassify();
+    const everythingEnabled = Settings.ExtraRadarTrackEverything;
 
-    const categories = [
-      {
-        filter: obj =>
-          (obj instanceof wow.CGUnit && obj.isRelatedToActiveQuest) ||
-          (obj instanceof wow.CGGameObject && obj.isLootable),
-        type: 'quests',
-        track: "ExtraRadarTrackQuests",
-        draw: "ExtraRadarDrawLinesQuests"
-      },
-      { filter: obj => obj instanceof wow.CGGameObject && Gatherables.herb[obj.entryId], type: 'herbs', track: "ExtraRadarTrackHerbs", draw: "ExtraRadarDrawLinesHerbs" },
-      { filter: obj => obj instanceof wow.CGGameObject && Gatherables.ore[obj.entryId], type: 'ores', track: "ExtraRadarTrackOres", draw: "ExtraRadarDrawLinesOres" },
-      {
-        filter: obj => obj instanceof wow.CGGameObject && Gatherables.treasure[obj.entryId],
-        type: 'treasures',
-        track: "ExtraRadarTrackTreasures",
-        draw: "ExtraRadarDrawLinesTreasures"
-      },
-      {
-        filter: obj => obj instanceof wow.CGUnit && obj.classification == Classification.Rare && !obj.deadOrGhost,
-        type: 'rares',
-        track: "ExtraRadarTrackRares",
-        draw: "ExtraRadarDrawLinesRares"
-      },
-    ];
+    const everythingBucket = buckets.everything;
+    const trackedEntries = [];
+    let closest = null;
 
-    categories.forEach(cat => {
-      if (Settings[cat.track]) {
-        const objects = this.getFilteredAndSortedObjects(cat.filter);
-        objects.forEach(obj => trackedObjects.add(obj));
-        this.drawObjects(objects, objectColors[cat.type], cat.draw);
-
-        if (objects.length > 0) {
-          const distance = me.distanceTo(objects[0].position);
-          if (distance < closestDistance) {
-            closestDistance = distance;
-            closestTrackedObject = objects[0];
-          }
-        }
-      }
-    });
-
-    if (Settings.ExtraRadarTrackEverything) {
-      const everythingObjects = this.getFilteredAndSortedObjects(obj => obj instanceof wow.CGObject && obj !== me);
-      const newObjects = everythingObjects.filter(obj => !trackedObjects.has(obj));
-      newObjects.forEach(obj => trackedObjects.add(obj));
-      this.drawObjects(newObjects, objectColors.default, "ExtraRadarDrawLinesEverything");
-
-      if (newObjects.length > 0) {
-        const distance = me.distanceTo(newObjects[0].position);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestTrackedObject = newObjects[0];
-        }
+    for (const cat of CATEGORY_ORDER) {
+      const entries = buckets[cat];
+      if (entries.length === 0) continue;
+      if (Settings[CATEGORY_TRACK[cat]]) {
+        entries.sort(cmpDist);
+        this.drawObjects(entries, objectColors[cat], CATEGORY_DRAW[cat]);
+        for (const e of entries) trackedEntries.push(e);
+        if (!closest || entries[0].distSqr < closest.distSqr) closest = entries[0];
+      } else if (everythingEnabled) {
+        for (const e of entries) everythingBucket.push(e);
       }
     }
 
-    const allObjectsArray = Array.from(trackedObjects);
-
-    if (Settings.ExtraRadarDrawOffScreenObjects) {
-      this.drawOffScreenObjects(allObjectsArray);
+    if (everythingEnabled && everythingBucket.length > 0) {
+      everythingBucket.sort(cmpDist);
+      this.drawObjects(everythingBucket, objectColors.default, CATEGORY_DRAW.everything);
+      for (const e of everythingBucket) trackedEntries.push(e);
+      if (!closest || everythingBucket[0].distSqr < closest.distSqr) closest = everythingBucket[0];
     }
 
-    // Draw line to the closest tracked object
-    if (Settings.ExtraRadarDrawLinesClosest && closestTrackedObject) {
+    if (Settings.ExtraRadarDrawOffScreenObjects && trackedEntries.length > 0) {
+      this.drawOffScreenObjects(trackedEntries);
+    }
+
+    if (Settings.ExtraRadarDrawLinesClosest && closest && closest.screenPos && closest.screenPos.x !== -1) {
       const canvas = imgui.getBackgroundDrawList();
       const mePos = wow.WorldFrame.getScreenCoordinates(me.position);
-      const closestPos = wow.WorldFrame.getScreenCoordinates(closestTrackedObject.position);
-      if (closestPos && closestPos.x !== -1) {
-        canvas.addLine(mePos, closestPos, objectColors.default, 2);
-      }
+      canvas.addLine(mePos, closest.screenPos, objectColors.default, 2);
     }
 
-    if (Settings.ExtraRadarInteractTracked && !me.currentCastOrChannel) {
-      for (const obj of trackedObjects) {
+    if (Settings.ExtraRadarInteractTracked && !me.currentCastOrChannel && !me.isMoving()) {
+      for (const entry of trackedEntries) {
+        const obj = entry.obj;
         if (!(obj instanceof wow.CGGameObject)) continue;
-        if (me.withinInteractRange(obj) && !me.isMoving()) {
+        if (me.withinInteractRange(obj)) {
           obj.interact();
           break;
         }

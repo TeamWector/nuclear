@@ -473,8 +473,11 @@ class Spell extends wow.EventListener {
           const currentTime = wow.frameTime;
           const castRemains = castInfo.castEnd - currentTime;
           const castTime = castInfo.castEnd - castInfo.castStart;
-          const castPctRemain = (castRemains / castTime) * 100;
           const channelTime = currentTime - castInfo.channelStart;
+          if (!target.isChanneling && castTime <= 0) {
+            continue;
+          }
+          const castPctRemain = (castRemains / castTime) * 100;
           // Generate a random interrupt time between 300 and 1100 ms (700 ± 400)
           const randomInterruptTime = 700 + (Math.random() * 800 - 400);
 
