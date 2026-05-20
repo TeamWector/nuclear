@@ -9,6 +9,7 @@ import { defaultHealTargeting as heal } from "@/Targeting/HealTargeting";
 import Settings from "@/Core/Settings";
 import { DispelPriority } from "@/Data/Dispels";
 import { WoWDispelType } from "@/Enums/Auras";
+import { PowerType } from "@/Enums/PowerType";
 
 const auras = {
   renewingMist: 119611,
@@ -17,6 +18,7 @@ const auras = {
 
 const spells = {
   soothingMist: 115175,
+  manaTea: 115294,
 };
 
 export class MonkMistweaverBehavior extends Behavior {
@@ -38,13 +40,27 @@ export class MonkMistweaverBehavior extends Behavior {
       spell.interrupt("Spear Hand Strike", false),
       new bt.Action(() => {
         if (!me.isCastingOrChanneling) return bt.Status.Failure;
-        if (me.spellInfo?.spellChannelId === spells.soothingMist) return bt.Status.Failure;
+        if (me.spellInfo?.spellChannelId === spells.soothingMist) {
+          if (!this.getValidAllies().some(a => a.effectiveHealthPercent < 100)) {
+            me.stopCasting();
+            return bt.Status.Success;
+          }
+          return bt.Status.Failure;
+        }
+        if (me.spellInfo?.spellChannelId === spells.manaTea) {
+          if (me.pctPowerByType(PowerType.Mana) >= 100) {
+            me.stopCasting();
+            return bt.Status.Success;
+          }
+          return bt.Status.Failure;
+        }
         return bt.Status.Success;
       }),
 
       new bt.Decorator(
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
+          spell.cast("Mana Tea", req => this.shouldCastManaTea()),
           spell.cast("Renewing Mist", on => this.getRenewingMistTankTarget(), req => this.getRenewingMistTankTarget() !== null),
           spell.cast("Renewing Mist", on => this.getRenewingMistTarget(), req => this.getRenewingMistTarget() !== null),
           spell.cast("Enveloping Mist", on => this.getEnvelopingMistTarget(), req => this.getEnvelopingMistTarget() !== null),
@@ -81,6 +97,11 @@ export class MonkMistweaverBehavior extends Behavior {
 
   isChannelingSoothingMist() {
     return me.spellInfo?.spellChannelId === spells.soothingMist;
+  }
+
+  shouldCastManaTea() {
+    if (me.pctPowerByType(PowerType.Mana) >= 100) return false;
+    return !this.getValidAllies().some(a => a.effectiveHealthPercent < 100);
   }
 
   getValidAllies() {
@@ -175,6 +196,7 @@ export class MonkMistweaverBehavior extends Behavior {
   }
 
   getSoothingMistTarget() {
+    if (this.isChannelingSoothingMist()) return null;
     const ally = this.getLowestAlly();
     if (!ally) return null;
     return ally.effectiveHealthPercent <= Settings.NeerMWSoothingMistThreshold ? ally : null;
