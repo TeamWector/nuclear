@@ -47,11 +47,16 @@ export class WarriorArmsPVE extends Behavior {
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
           this.battleShout(),
+          spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
           new bt.Decorator(
             ret => this.hasCooldownsReady(),
             this.burstCooldowns()
           ),
-          this.mainRotation()
+          new bt.Decorator(
+            ret => this.isAoE(),
+            this.aoeRotation()
+          ),
+          this.singleTargetRotation()
         )
       )
     );
@@ -65,54 +70,39 @@ export class WarriorArmsPVE extends Behavior {
     return new bt.Selector(
       this.useRacials(),
       this.useTrinkets(),
-      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavager()),
+      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager")),
       spell.cast("Avatar", ret => this.shouldCastAvatar()),
       spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
       spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
     );
   }
 
-  mainRotation() {
-    const enemyCount = this.getEnemiesInRange(8);
-
-    // 3+ targets: Cleave-focused AoE rotation
-    if (enemyCount >= 3) {
-      return this.aoeCleaveRotation();
-    }
-
-    // 2 targets: Sweeping Strikes + single target rotation
-    if (enemyCount === 2) {
-      return this.sweepingStrikesRotation();
-    }
-
-    // Single target
-    if (this.isExecutePhase()) {
-      return this.executeRotation();
-    }
-    return this.normalRotation();
-  }
-
-  normalRotation() {
+  singleTargetRotation() {
     return new bt.Selector(
-      // Rend upkeep - refresh when < 4 seconds remaining
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
+      // Sweeping Strikes (2 targets)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
 
-      // Avatar (per method.gg - timing is critical)
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
+      // Demolish - during Smash (Colossus build)
+      spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
 
-      // Colossus Smash
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
-
-      // Demolish during Colossus Smash (Colossus build)
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
-
-      // Heroic Strike (Apex proc) - high priority
+      // Heroic Strike (Master of Warfare)
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
 
-      // Execute during Sudden Death - before Mortal Strike
+      // Execute Sudden Death
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
-      // Mortal Strike - keep on cooldown
+      // Execute phase priority
+      new bt.Decorator(
+        ret => this.isExecutePhase(),
+        new bt.Selector(
+          spell.cast("Mortal Strike", on => me.target, ret => this.getExecutionersPrecisionStacks() === 2),
+          spell.cast("Execute", on => me.target, ret => this.shouldExecute() && (me.powerByType(PowerType.Rage) >= 70 || this.getExecutionersPrecisionStacks() < 2)),
+          spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower() && me.powerByType(PowerType.Rage) < 70),
+          spell.cast("Execute", on => me.target, ret => this.shouldExecute()),
+        )
+      ),
+
+      // Mortal Strike (Colossus build)
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
 
       // Overpower
@@ -121,118 +111,39 @@ export class WarriorArmsPVE extends Behavior {
       // Mortal Strike fallback
       spell.cast("Mortal Strike", on => me.target),
 
-      // Slam to fill - only at high rage
+      // Slam filler
       spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
 
-  executeRotation() {
+  aoeRotation() {
     return new bt.Selector(
-      // Rend upkeep
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
+      // Sweeping Strikes (2 targets in AOE)
+      spell.cast("Sweeping Strikes", ret => me.getEnemies(8).length === 2),
 
-      // Heroic Strike (Apex proc) - top priority in execute
+      // Demolish - during Smash (Colossus build)
+      spell.cast("Demolish", on => me.target, ret => this.isColossusBuild() && this.hasSmashDebuff()),
+
+      // Heroic Strike (Master of Warfare)
       spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
 
-      // Demolish during Colossus Smash with 10 stacks
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishExecute()),
-
-      // Execute during Sudden Death
+      // Execute Sudden Death
       spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
 
-      // Mortal Strike (at 2 stacks Executioner's Precision)
-      spell.cast("Mortal Strike", on => me.target, ret => this.getExecutionersPrecisionStacks() === 2),
-
-      // Execute (when rage > 70 or no Executioner's Precision stacks)
-      spell.cast("Execute", on => me.target, ret => this.shouldExecute() && (me.powerByType(PowerType.Rage) >= 70 || this.getExecutionersPrecisionStacks() < 2)),
-
-      // Overpower (when rage < 70)
-      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower() && me.powerByType(PowerType.Rage) < 70),
-
-      // Mortal Strike
-      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
-
-      // Execute (fallback)
-      spell.cast("Execute", on => me.target, ret => this.shouldExecute()),
-
-      // Slam to fill - only at high rage
-      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
-    );
-  }
-
-  // 2 targets: Sweeping Strikes + single target rotation
-  sweepingStrikesRotation() {
-    return new bt.Selector(
-      // Apply/refresh Rend on target
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Cast Sweeping Strikes if not active
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
-
-      // Burst cooldowns
-      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavager()),
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
-      spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
-
-      // Demolish during Colossus Smash
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishSingle()),
-
-      // Heroic Strike
-      spell.cast("Heroic Strike", on => me.target, ret => this.hasHeroicStrikeProc()),
-
-      // Mortal Strike - cleaves to second target via Sweeping Strikes
-      spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
-
-      // Overpower
-      spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
-
-      // Mortal Strike fallback
-      spell.cast("Mortal Strike", on => me.target),
-
-      // Execute during Sudden Death
-      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
-
-      // Slam to fill
-      spell.cast("Slam", on => me.target, ret => this.shouldSlam())
-    );
-  }
-
-  // 3+ targets: Cleave-focused AoE rotation (per method.gg research)
-  aoeCleaveRotation() {
-    return new bt.Selector(
-      // Cast Sweeping Strikes if not active (helps cleave to extra targets)
-      spell.cast("Sweeping Strikes", ret => this.shouldCastSweepingStrikes()),
-
-      // Apply/refresh Rend
-      spell.cast("Rend", on => me.target, ret => this.shouldCastRend()),
-
-      // Burst cooldowns
-      spell.cast("Ravager", on => me.target, ret => spell.isSpellKnown("Ravager") && this.shouldCastRavagerAoE()),
-      spell.cast("Avatar", ret => this.shouldCastAvatar()),
-      spell.cast("Colossus Smash", on => me.target, ret => this.shouldCastColossusSmash()),
-      spell.cast("Bladestorm", on => me.target, ret => spell.isSpellKnown("Bladestorm")),
-
-      // Demolish during Colossus Smash - HIGH priority
-      spell.cast("Demolish", on => me.target, ret => this.shouldCastDemolishAoE()),
-
-      // Collateral Damage buff: prioritize Cleave (75% increased damage at 3 stacks)
-      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage() && this.shouldCastCleave()),
+      // Collateral Damage Cleave
+      spell.cast("Cleave", on => me.target, ret => this.hasCollateralDamage()),
       spell.cast("Whirlwind", on => me.target, ret => this.hasCollateralDamage() && spell.isSpellKnown("Whirlwind")),
 
-      // Cleave - main AoE spam for 3+ targets
-      spell.cast("Cleave", on => me.target, ret => this.shouldCastCleave()),
+      // Cleave spam
+      spell.cast("Cleave", on => me.target),
 
-      // Mortal Strike (Mortal Wounds now triggers from Mortal Strike and Slam per 12.0.5)
+      // Mortal Strike (Colossus build)
       spell.cast("Mortal Strike", on => me.target, ret => this.isColossusBuild()),
 
       // Overpower
       spell.cast("Overpower", on => me.target, ret => this.shouldCastOverpower()),
 
-      // Execute during Sudden Death
-      spell.cast("Execute", on => me.target, ret => this.hasSuddenDeath()),
-
-      // Slam filler (also triggers Mortal Wounds per 12.0.5)
+      // Slam filler
       spell.cast("Slam", on => me.target, ret => this.shouldSlam())
     );
   }
@@ -262,17 +173,8 @@ export class WarriorArmsPVE extends Behavior {
     return me.target.pctHealth < 20;
   }
 
-  hasTalent(talentName) {
-    return me.hasAura(talentName);
-  }
-
   isColossusBuild() {
     return spell.isSpellKnown("Demolish");
-  }
-
-  colossalMightStacks() {
-    const n = me.getAuraStacks(auras.colossalMight);
-    return typeof n === "number" ? n : 0;
   }
 
   hasSmashDebuff() {
@@ -292,84 +194,34 @@ export class WarriorArmsPVE extends Behavior {
     if (!spell.isSpellKnown("Rend")) return false;
     if (!me.target) return false;
     const rendAura = me.target.getAuraByMe(auras.rend);
-    // Cast if no Rend or less than 4 seconds remaining
     if (!rendAura) return true;
     return rendAura.remaining < 4000;
-  }
-
-  shouldCastRendAoE() {
-    if (!spell.isSpellKnown("Rend")) return false;
-    if (!me.target) return false;
-    const rendAura = me.target.getAuraByMe(auras.rend);
-    // In AoE, refresh Rend when < 4 seconds remaining
-    if (!rendAura) return true;
-    return rendAura.remaining < 4000;
-  }
-
-  shouldCastRavager() {
-    // Ravager before Colossus Smash
-    if (!spell.isOnCooldown("Colossus Smash") && spell.isSpellKnown("Colossus Smash")) return true;
-    return !spell.isOnCooldown("Ravager");
-  }
-
-  shouldCastRavagerAoE() {
-    // In AoE, just use Ravager off cooldown
-    return true;
   }
 
   shouldCastAvatar() {
-    if (!spell.isSpellKnown("Avatar")) return false;
-    if (spell.isOnCooldown("Avatar")) return false;
-    // Use Avatar before/with Colossus Smash
-    if (!spell.isOnCooldown("Colossus Smash") && spell.isSpellKnown("Colossus Smash")) return true;
-    return true;
+    return spell.isSpellKnown("Avatar") && !spell.isOnCooldown("Avatar");
   }
 
   shouldCastColossusSmash() {
-    if (!spell.isSpellKnown("Colossus Smash")) return false;
-    if (spell.isOnCooldown("Colossus Smash")) return false;
-    return true;
-  }
-
-  shouldCastDemolishSingle() {
-    if (!spell.isSpellKnown("Demolish") || !this.isColossusBuild()) return false;
-    if (!me.target) return false;
-    // Cast Demolish during Colossus Smash
-    if (this.hasSmashDebuff()) return true;
-    return false;
-  }
-
-  shouldCastDemolishExecute() {
-    if (!spell.isSpellKnown("Demolish") || !this.isColossusBuild()) return false;
-    if (!me.target) return false;
-    // Cast Demolish during Colossus Smash and 10 stacks of Colossal Might
-    if (this.hasSmashDebuff() && this.colossalMightStacks() >= 10) return true;
-    return false;
-  }
-
-  shouldCastDemolishAoE() {
-    if (!spell.isSpellKnown("Demolish") || !this.isColossusBuild()) return false;
-    if (!me.target) return false;
-    // Cast during Colossus Smash
-    if (this.hasSmashDebuff()) return true;
-    return false;
+    return spell.isSpellKnown("Colossus Smash") && !spell.isOnCooldown("Colossus Smash");
   }
 
   shouldCastOverpower() {
-    if (!spell.isSpellKnown("Overpower")) return false;
-    if (spell.isOnCooldown("Overpower")) return false;
-    return true;
+    return spell.isSpellKnown("Overpower") && !spell.isOnCooldown("Overpower");
   }
 
-  shouldCastSweepingStrikes() {
-    if (!spell.isSpellKnown("Sweeping Strikes")) return false;
-    if (me.hasAura(auras.sweepingStrikes)) return false;
-    return this.getEnemiesInRange(8) >= 2;
+  shouldSlam() {
+    return me.powerByType(PowerType.Rage) >= 60;
   }
 
-  shouldCastCleave() {
-    if (!spell.isSpellKnown("Cleave")) return false;
-    return this.getEnemiesInRange(8) >= 3;
+  shouldExecute() {
+    if (!me.target) return false;
+    return me.target.pctHealth < 20;
+  }
+
+  colossalMightStacks() {
+    const n = me.getAuraStacks(auras.colossalMight);
+    return typeof n === "number" ? n : 0;
   }
 
   hasCollateralDamage() {
@@ -380,31 +232,7 @@ export class WarriorArmsPVE extends Behavior {
     return me.getAuraStacks(auras.executionersPrecision);
   }
 
-  shouldExecute() {
-    if (!me.target) return false;
-    return me.target.pctHealth < 20;
-  }
-
-  shouldSlam() {
-    // Slam as filler - only when we have excess rage
-    // Note: Master of Warfare makes Slam become Heroic Strike automatically
-    return me.powerByType(PowerType.Rage) >= 60;
-  }
-
   hasCooldownsReady() {
     return Combat.burstToggle && me.target && me.isWithinMeleeRange(me.target);
-  }
-
-  getEnemiesInRange(range) {
-    return me.getUnitsAroundCount(range);
-  }
-
-  getCurrentTarget() {
-    const targetPredicate = unit => common.validTarget(unit) && me.isWithinMeleeRange(unit) && me.isFacing(unit);
-    const target = me.target;
-    if (target !== null && targetPredicate(target)) {
-      return target;
-    }
-    return Combat.targets.find(targetPredicate) || null;
   }
 }
