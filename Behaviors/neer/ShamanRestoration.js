@@ -99,40 +99,60 @@ export class ShamanRestorationBehavior extends Behavior {
     );
   }
 
+  _cacheFrame = -1;
+  _cachedAllies = null;
+  _cachedLowestAlly = undefined;
+  _cachedTank = undefined;
+  _cachedChainLightning = undefined;
+
+  _refreshCache() {
+    if (this._cacheFrame === wow.frameTime) return;
+    this._cacheFrame = wow.frameTime;
+    this._cachedAllies = null;
+    this._cachedLowestAlly = undefined;
+    this._cachedTank = undefined;
+    this._cachedChainLightning = undefined;
+  }
+
+  getValidAllies() {
+    this._refreshCache();
+    if (this._cachedAllies !== null) return this._cachedAllies;
+    this._cachedAllies = (heal.priorityList || []).filter(a =>
+      a && a.effectiveHealthPercent > 0 && me.withinLineOfSight(a) && me.distanceTo(a) <= 40
+    );
+    return this._cachedAllies;
+  }
+
+  getLowestAlly() {
+    this._refreshCache();
+    if (this._cachedLowestAlly !== undefined) return this._cachedLowestAlly;
+    const list = this.getValidAllies();
+    this._cachedLowestAlly = list.length === 0
+      ? null
+      : list.reduce((lo, a) => (a.effectiveHealthPercent < lo.effectiveHealthPercent ? a : lo), list[0]);
+    return this._cachedLowestAlly;
+  }
+
   hasEarthShield(unit) {
     if (!unit) return false;
     return unit.hasAura(auras.earthShield) || unit.hasAura(auras.earthShieldSelf);
   }
 
   getTankNeedingEarthShield() {
+    this._refreshCache();
+    if (this._cachedTank !== undefined) return this._cachedTank;
     const tanks = (heal.friends.Tanks || []).filter(t => t);
-    const active = tanks.find(t =>
-      t.guid && !t.guid.equals(me.guid) && t.isTanking() &&
-      !this.hasEarthShield(t) && me.withinLineOfSight(t) && me.distanceTo(t) <= 40
-    );
-    if (active) return active;
-    return tanks.find(t =>
-      t.guid && !t.guid.equals(me.guid) &&
-      !this.hasEarthShield(t) && me.withinLineOfSight(t) && me.distanceTo(t) <= 40
-    ) || null;
-  }
-
-  getLowestAlly() {
-    const list = (heal.priorityList || []).filter(a =>
-      a && a.effectiveHealthPercent > 0 && me.withinLineOfSight(a) && me.distanceTo(a) <= 40
-    );
-    if (list.length === 0) return null;
-    return list.reduce((lo, a) => (a.effectiveHealthPercent < lo.effectiveHealthPercent ? a : lo), list[0]);
+    const eligible = t => t.guid && !t.guid.equals(me.guid) && !this.hasEarthShield(t) &&
+      me.withinLineOfSight(t) && me.distanceTo(t) <= 40;
+    this._cachedTank = tanks.find(t => eligible(t) && t.isTanking()) || tanks.find(eligible) || null;
+    return this._cachedTank;
   }
 
   getRiptideTarget() {
-    const list = (heal.priorityList || []).filter(a =>
-      a && a.effectiveHealthPercent > 0 && me.withinLineOfSight(a) && me.distanceTo(a) <= 40
-    );
-    const injured = list.find(a =>
+    const list = this.getValidAllies();
+    return list.find(a =>
       a.effectiveHealthPercent <= Settings.NeerRestoRiptideThreshold && !a.hasAuraByMe(auras.riptide)
-    );
-    return injured || null;
+    ) || null;
   }
 
   getHealingWaveTarget() {
@@ -142,7 +162,10 @@ export class ShamanRestorationBehavior extends Behavior {
   }
 
   getChainLightningTarget() {
-    return combat.targets.find(t => combat.getUnitsAroundUnit(t, 10).length >= 2) || null;
+    this._refreshCache();
+    if (this._cachedChainLightning !== undefined) return this._cachedChainLightning;
+    this._cachedChainLightning = combat.targets.find(t => combat.getUnitsAroundUnit(t, 10).length >= 2) || null;
+    return this._cachedChainLightning;
   }
 
   isTotemActive(totemName) {
@@ -173,9 +196,7 @@ export class ShamanRestorationBehavior extends Behavior {
   }
 
   getChainHealTarget() {
-    const list = (heal.priorityList || []).filter(a =>
-      a && a.effectiveHealthPercent > 0 && me.withinLineOfSight(a) && me.distanceTo(a) <= 40
-    );
+    const list = this.getValidAllies();
     const injured = list.filter(a => a.effectiveHealthPercent <= Settings.NeerRestoChainHealThreshold);
     if (injured.length < Settings.NeerRestoChainHealMinTargets) return null;
     return injured.reduce((lo, a) => (a.effectiveHealthPercent < lo.effectiveHealthPercent ? a : lo), injured[0]);
