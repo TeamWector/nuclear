@@ -240,7 +240,7 @@ export class DeathKnightUnholy extends Behavior {
 
   shouldBloodforgedDeathStrike() {
     // If talented in Bloodforged Armor, press Death Strike every 4 sec when health < 90%
-    if (spell.isSpellKnown("Bloodforged Armor") && me.pctHealth < 90) {
+    if (me.hasPvPTalent("Bloodforged Armor") && me.pctHealth < 90) {
       const timeSinceLastDeathStrike = Spell.getTimeSinceLastCast("Death Strike");
       if (timeSinceLastDeathStrike >= 4000) {
         return true;

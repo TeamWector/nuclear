@@ -137,7 +137,7 @@ export class PriestDisciplinePvP extends Behavior {
               ),
               // Fade for incoming CC - but don't interrupt Ultimate Penitence cast/rise phase
               new bt.Decorator(
-                () => !this.isCastingUltimatePenitence(),
+                () => me.hasPvPTalent("Phase Shift") && !this.isCastingUltimatePenitence(),
                 spell.cast("Fade", () =>
                   this.canAttemptFadeCast() &&
                   this.hasIncomingCCForFade() &&
@@ -146,7 +146,7 @@ export class PriestDisciplinePvP extends Behavior {
               ),
               // Preemptive Fade for predicted enemy CC (priest within 8y, rogue within 4y)
               new bt.Decorator(
-                () => !this.isCastingUltimatePenitence(),
+                () => me.hasPvPTalent("Phase Shift") && !this.isCastingUltimatePenitence(),
                 spell.cast("Fade", () =>
                   this.canAttemptFadeCast() &&
                   Settings.UsePreemptiveFade &&
@@ -811,10 +811,13 @@ export class PriestDisciplinePvP extends Behavior {
       spell.cast("Shadow Word: Death", on => this.findAdvancedShadowWordDeathTarget(), ret =>
         Settings.UseAdvancedShadowWordDeath === true && this.findAdvancedShadowWordDeathTarget() !== undefined
       ),
-      spell.cast("Fade", () =>
-        this.canAttemptFadeCast() &&
-        Settings.UseFadeForReflectSpells === true &&
-        this.shouldUseFadeForReflectSpells()
+      new bt.Decorator(
+        () => me.hasPvPTalent("Phase Shift"),
+        spell.cast("Fade", () =>
+          this.canAttemptFadeCast() &&
+          Settings.UseFadeForReflectSpells === true &&
+          this.shouldUseFadeForReflectSpells()
+        )
       ),
       spell.cast("Power Infusion", on => this.findPowerInfusionTarget(), ret =>
         Settings.UseAutoPowerInfusion === true && this.findPowerInfusionTarget() !== undefined
