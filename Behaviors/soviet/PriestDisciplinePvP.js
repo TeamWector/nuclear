@@ -109,66 +109,68 @@ export class PriestDisciplinePvP extends Behavior {
       common.waitForNotWaitingForArenaToStart(),
       common.waitForNotSitting(),
       common.waitForNotMounted(),
-      this.waitForNotJustCastPenitence(),
-      // Stop casting for CC counter - this needs to be outside GCD check
+      // BLOCK everything while Ultimate Penitence is mid-cast (before GCD check)
       new bt.Decorator(
-        () => this.shouldStopCastingForCCCounter(),
-        new bt.Action(_ => {
-          me.stopCasting();
-          console.log(`[Priest] Stopped casting to counter incoming CC`);
-          return bt.Status.Success;
-        })
-      ),
-
-      // Main behavior tree with GCD check
-      new bt.Decorator(
-        ret => !spell.isGlobalCooldown(),
+        () => !this.isCastingUltimatePenitence(),
         new bt.Selector(
-          // High priority Shadow Word: Death for incoming CC (single cached target per frame — see _refreshIncomingCcCache)
-          // Also protect SW:D from being interrupted during Ultimate Penitence cast
+          // Stop casting for CC counter - this needs to be outside GCD check
           new bt.Decorator(
-            () => !this.isCastingUltimatePenitence(), // Don't interrupt UP cast
-            spell.cast("Shadow Word: Death", on => this.findIncomingCCTarget(), ret => {
-              const t = this.findIncomingCCTarget();
-              return Settings.UseShadowWordDeathForCCD && t != null && !spell.isOnCooldown("Shadow Word: Death");
+            () => this.shouldStopCastingForCCCounter(),
+            new bt.Action(_ => {
+              me.stopCasting();
+              console.log(`[Priest] Stopped casting to counter incoming CC`);
+              return bt.Status.Success;
             })
           ),
-          // Fade for incoming CC - but don't interrupt Ultimate Penitence cast/rise phase
+
+          // Main behavior tree with GCD check
           new bt.Decorator(
-            () => !this.isCastingUltimatePenitence(),
-            spell.cast("Fade", () =>
-              this.canAttemptFadeCast() &&
-              this.hasIncomingCCForFade() &&
-              !spell.isOnCooldown("Fade")
+            ret => !spell.isGlobalCooldown(),
+            new bt.Selector(
+              // High priority Shadow Word: Death for incoming CC (single cached target per frame — see _refreshIncomingCcCache)
+              new bt.Decorator(
+                () => !this.isCastingUltimatePenitence(),
+                spell.cast("Shadow Word: Death", on => this.findIncomingCCTarget(), ret => {
+                  const t = this.findIncomingCCTarget();
+                  return Settings.UseShadowWordDeathForCCD && t != null && !spell.isOnCooldown("Shadow Word: Death");
+                })
+              ),
+              // Fade for incoming CC - but don't interrupt Ultimate Penitence cast/rise phase
+              new bt.Decorator(
+                () => !this.isCastingUltimatePenitence(),
+                spell.cast("Fade", () =>
+                  this.canAttemptFadeCast() &&
+                  this.hasIncomingCCForFade() &&
+                  !spell.isOnCooldown("Fade")
+                )
+              ),
+              // Preemptive Fade for predicted enemy CC (priest within 8y, rogue within 4y)
+              new bt.Decorator(
+                () => !this.isCastingUltimatePenitence(),
+                spell.cast("Fade", () =>
+                  this.canAttemptFadeCast() &&
+                  Settings.UsePreemptiveFade &&
+                  !spell.isOnCooldown("Fade") &&
+                  this.shouldPreemptiveFade()
+                )
+              ),
+
+              common.waitForCastOrChannel(),
+
+              spell.cast("Psychic Scream", on => this.psychicScreamTarget(), ret => this.psychicScreamTarget() !== undefined),
+
+              // Oracle PvP: triage first, then safe proactive spread when no one is in danger
+              this.healRotation(),
+              this.applyAtonement(),
+
+              // Spells that require target and/or facing
+              common.waitForTarget(),
+              common.waitForFacing(),
+              new bt.Decorator(
+                () => !this.shouldPauseTargetedDamageForHealing(),
+                this.targetedDamageRotation()
+              )
             )
-          ),
-
-          // Preemptive Fade for predicted enemy CC (priest within 8y, rogue within 4y)
-          // Also don't interrupt Ultimate Penitence cast/rise phase
-          new bt.Decorator(
-            () => !this.isCastingUltimatePenitence(),
-            spell.cast("Fade", () =>
-              this.canAttemptFadeCast() &&
-              Settings.UsePreemptiveFade &&
-              !spell.isOnCooldown("Fade") &&
-              this.shouldPreemptiveFade()
-            )
-          ),
-
-          common.waitForCastOrChannel(),
-
-          spell.cast("Psychic Scream", on => this.psychicScreamTarget(), ret => this.psychicScreamTarget() !== undefined),
-
-          // Oracle PvP: triage first, then safe proactive spread when no one is in danger
-          this.healRotation(),
-          this.applyAtonement(),
-
-          // Spells that require target and/or facing
-          common.waitForTarget(),
-          common.waitForFacing(),
-          new bt.Decorator(
-            () => !this.shouldPauseTargetedDamageForHealing(),
-            this.targetedDamageRotation()
           )
         )
       )
@@ -192,16 +194,24 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   isCastingUltimatePenitence() {
-    // Ultimate Penitence: check current channel/cast state first (most reliable)
-    if (me.currentChannel === 421453 || me.currentCast === 421453) {
+    // Direct currentCast check first - most reliable
+    if (me.currentCast === 421453 || me.currentChannel === 421453) {
       return true;
     }
-    // Fallback: check time since cast (covers cast + rise window)
+    // Time-based fallback: check if we cast UP recently (within 3 seconds)
     const timeSinceCast = spell.getTimeSinceLastCast("Ultimate Penitence");
-    return timeSinceCast < 2200;
+    if (timeSinceCast < 3000) {
+      return true;
+    }
+    return false;
   }
 
   shouldStopCastingForCCCounter() {
+    // Direct check: if we're mid-cast on UP, never interrupt
+    if (me.currentCast === 421453) {
+      return false;
+    }
+
     // Only check if we're currently casting something
     if (!me.isCastingOrChanneling) {
       return false;
