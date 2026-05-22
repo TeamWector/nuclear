@@ -27,6 +27,8 @@ const auras = {
   powerInfusion: 10060,
   archangel: 81700,
   evangelism: 472443,
+  ultimatePenitenceCast: 421453,  // Initial cast/rise aura
+  ultimatePenitenceChannel: 421434, // Channel aura
 };
 
 /** Oracle PvP: minimum allies with Atonement before Evangelism is worth pressing. */
@@ -194,8 +196,12 @@ export class PriestDisciplinePvP extends Behavior {
   }
 
   isCastingUltimatePenitence() {
-    // Direct currentCast check first - most reliable
-    if (me.currentCast === 421453 || me.currentChannel === 421453) {
+    // Direct currentCast/currentChannel check first - most reliable
+    if (me.currentCast === 421453 || me.currentChannel === 421453 || me.currentChannel === 421434) {
+      return true;
+    }
+    // Aura check for both phases (cast aura 421453 and channel aura 421434)
+    if (me.hasAura(auras.ultimatePenitenceCast) || me.hasAura(auras.ultimatePenitenceChannel)) {
       return true;
     }
     // Time-based fallback: check if we cast UP recently (within 3 seconds)
