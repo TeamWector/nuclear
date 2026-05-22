@@ -194,6 +194,18 @@ Object.defineProperties(wow.CGActivePlayer.prototype, {
       return wow.PetInfo.pets[0]?.toUnit() ?? undefined;
     }
   },
+
+  hasPvPTalent: {
+    /**
+     * Check if the player has a specific PvP talent by name.
+     * PvP talents appear as auras on the player.
+     * @param {string} talentName - The name of the PvP talent to check for.
+     * @returns {boolean} - True if the player has the talent, false otherwise.
+     */
+    value: function (talentName) {
+      return this.hasAura(talentName);
+    }
+  },
 });
 
 export default true;
