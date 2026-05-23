@@ -5,6 +5,7 @@ import common from '@/Core/Common';
 import spell from "@/Core/Spell";
 import { me } from "@/Core/ObjectManager";
 import { defaultCombatTargeting as combat } from "@/Targeting/CombatTargeting";
+import { PowerType } from "@/Enums/PowerType";
 
 const auras = {
   crusaderAura: 32223,
@@ -39,6 +40,7 @@ export class PaladinRetributionBehavior extends Behavior {
           common.waitForFacing(),
           common.ensureAutoAttack(),
           spell.cast("Avenging Wrath", on => me, req => combat.targets.length >= 1),
+          spell.cast("Divine Toll", on => this.getTarget(30), req => me.powerByType(PowerType.HolyPower) === 0 && combat.targets.length > 0),
           spell.cast("Judgment", on => this.getTarget(30)),
           spell.cast("Hammer of Wrath", on => this.getTarget(30)),
           spell.cast("Divine Storm", on => me, req => combat.getUnitsAroundUnit(me, 8).length > 2),

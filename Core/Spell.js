@@ -114,7 +114,6 @@ class Spell extends wow.EventListener {
       target,
       timestamp: wow.frameTime,
     });
-    wow.Chat.addMessage(`[Queue+] ${castSpell.name} -> ${target.unsafeName || "?"}`);
   }
 
   _resolveCastTarget(eventData) {
