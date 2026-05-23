@@ -82,6 +82,8 @@ export class DeathKnightUnholy extends Behavior {
           common.waitForNotSitting(),
           common.waitForNotMounted(),
           common.waitForCastOrChannel(),
+          // Bloodforged Armor talent: press Death Strike every 4 sec when health < 90%
+          spell.cast("Death Strike", ret => this.shouldBloodforgedDeathStrike()),
           spell.cast(
             "Death Pact",
             on => me,
@@ -234,5 +236,16 @@ export class DeathKnightUnholy extends Behavior {
     return new bt.Selector(
       spell.cast("Blood Fury", on => me, ret => me.race === RaceType.Orc),
     );
+  }
+
+  shouldBloodforgedDeathStrike() {
+    // If talented in Bloodforged Armor, press Death Strike every 4 sec when health < 90%
+    if (me.hasPvPTalent("Bloodforged Armor") && me.pctHealth < 90) {
+      const timeSinceLastDeathStrike = Spell.getTimeSinceLastCast("Death Strike");
+      if (timeSinceLastDeathStrike >= 4000) {
+        return true;
+      }
+    }
+    return false;
   }
 }

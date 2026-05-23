@@ -618,7 +618,7 @@ class Spell extends wow.EventListener {
               ? aura.isDebuff() && dispelPriority >= priority
               : aura.isBuff() && dispelPriority >= priority;
 
-            if (isValidDispel && aura.remaining > 2000 && dispelTypeMatch) {
+            if (isValidDispel && aura.remaining > 1200 && dispelTypeMatch) {
               const durationPassed = aura.duration - aura.remaining;
 
               // Check if we should dispel based on the settings
