@@ -7,7 +7,8 @@ import { interrupts } from '@/Data/Interrupts';
 import Settings from './Settings';
 import { defaultHealTargeting as heal } from '@/Targeting/HealTargeting';
 import { defaultCombatTargeting as combat } from '@/Targeting/CombatTargeting';
-import CommandListener from './CommandListener';
+const NUCLEAR_MATCH_WINDOW_MS = 500;
+const QUEUE_EXPIRY_MS = 2000;
 
 class Spell extends wow.EventListener {
   constructor() {
@@ -17,6 +18,7 @@ class Spell extends wow.EventListener {
     this._lastSuccessfulCastTimes = new Map();
     this._lastNonInstantCastTime = 0;
     this._lastSuccessfulSpells = []; // Array to store the last successful spells
+    this._castQueue = [];
   }
 
   /** @type {{get: function(): (wow.CGUnit|undefined)}} */
@@ -34,42 +36,110 @@ class Spell extends wow.EventListener {
     _lastSpell;
 
   onEvent(event) {
-    if (event.name === "COMBAT_LOG_EVENT_UNFILTERED") {
-      const [eventData] = event.args;
+    if (event.name !== "COMBAT_LOG_EVENT_UNFILTERED") return;
+    const [eventData] = event.args;
+    if (!eventData?.source?.guid || !me?.guid || !eventData.source.guid.equals(me.guid)) return;
 
-      if (eventData.eventType === 6) { // SPELL_CAST_SUCCESS
-        if (eventData.source.guid.equals(me.guid)) {
-          const spellId = eventData.args[0];
-          const castSpell = new wow.Spell(spellId);
-          const spellName = castSpell.name.toLowerCase();
-          const targetName = eventData.target ? eventData.target.unsafeName : "Unknown";
-          this._lastSuccessfulCastTimes.set(spellName, wow.frameTime);
-          if (castSpell.castTime > 0) {
-            this._lastNonInstantCastTime = wow.frameTime;
-          }
+    const eventType = eventData.eventType;
+    const spellId = eventData.args?.[0];
+    if (!spellId) return;
 
-          // Add to spell history array for combo strike tracking
-          this._lastSuccessfulSpells.push({
-            name: castSpell.name, // Use proper case name
-            id: spellId,
-            spellName: spellName, // Keep lowercase for compatibility
-            targetName: targetName,
-            timestamp: wow.frameTime
-          });
+    let castSpell = null;
+    try { castSpell = new wow.Spell(spellId); } catch {}
 
-          // Keep only the last 10 spells to prevent memory bloat
-          if (this._lastSuccessfulSpells.length > 10) {
-            this._lastSuccessfulSpells.shift();
-          }
+    // _lastCastTimes is keyed on the base spell.id (getSpell collapses overrides);
+    // CLEU args[0] can be the override id, so normalize before lookup.
+    const baseId = this.getSpell(spellId)?.id ?? spellId;
+    // castEx records the timestamp at cast start; SPELL_CAST_SUCCESS fires
+    // after castTime ms — widen the window so non-instants still match.
+    const recent = this._lastCastTimes.get(baseId);
+    const windowMs = NUCLEAR_MATCH_WINDOW_MS + (castSpell?.castTime || 0);
+    const fromNuclear = !!(recent && (wow.frameTime - recent) < windowMs);
 
-          // Check if there's a queued spell before removing it
-          const queuedSpell = CommandListener.getNextQueuedSpell();
-          if (queuedSpell && queuedSpell.spellName === spellName) {
-            CommandListener.removeSpellFromQueue(spellName);
-          }
-        }
+    if (eventType === 6) { // SPELL_CAST_SUCCESS
+      const spellName = (castSpell?.name || "").toLowerCase();
+      const targetName = eventData.target ? eventData.target.unsafeName : "Unknown";
+      this._lastSuccessfulCastTimes.set(spellName, wow.frameTime);
+      if (castSpell?.castTime > 0) {
+        this._lastNonInstantCastTime = wow.frameTime;
       }
+
+      this._lastSuccessfulSpells.push({
+        name: castSpell?.name || `${spellId}`,
+        id: spellId,
+        spellName,
+        targetName,
+        timestamp: wow.frameTime,
+      });
+      if (this._lastSuccessfulSpells.length > 10) {
+        this._lastSuccessfulSpells.shift();
+      }
+
+      // A queued cast finally went through — drop it.
+      this._removeQueuedCast(baseId);
     }
+
+    if (eventType === 7 && !fromNuclear) { // SPELL_CAST_FAILED from the player, not us
+      this._enqueueManualCast(baseId, castSpell, eventData);
+    }
+  }
+
+  /**
+   * Diagnostic: log player-sourced cast CLEU events to the WoW chat frame.
+   * Tags each event as `nuclear` (matches a _lastCastTimes record within
+   * NUCLEAR_MATCH_WINDOW_MS) or `manual` otherwise — used to design auto-queue
+   * for manual casts that happen during nuclear's GCDs.
+   *
+   * @param {number} eventType - CLEU eventType (4 START, 6 SUCCESS, 7 FAILED, ...)
+   * @param {number | undefined} spellId - args[0] of the CLEU event.
+   * @param {Object} eventData - Raw CLEU event data.
+   */
+  /**
+   * Enqueue a manual cast attempt (player CLEU SPELL_CAST_FAILED not initiated
+   * by nuclear). Drained on the next `cast()` tick.
+   */
+  _enqueueManualCast(baseId, castSpell, eventData) {
+    if (!castSpell?.name) return;
+    const spell = this.getSpell(baseId);
+    if (!spell || !spell.isKnown) return;
+    if (spell.cooldown && spell.cooldown.timeleft > 1500) return;
+    if (this._castQueue.some(e => e.baseId === baseId)) return;
+
+    const target = this._resolveCastTarget(eventData);
+    if (!target) return;
+
+    this._castQueue.push({
+      baseId,
+      name: castSpell.name,
+      target,
+      timestamp: wow.frameTime,
+    });
+    wow.Chat.addMessage(`[Queue+] ${castSpell.name} -> ${target.unsafeName || "?"}`);
+  }
+
+  _resolveCastTarget(eventData) {
+    if (eventData.target instanceof wow.CGUnit) return eventData.target;
+    const destGuid = eventData.destination?.guid;
+    if (destGuid && destGuid.toString() !== "0:0 (0)") {
+      if (me.guid.equals(destGuid)) return me;
+      const unit = destGuid.toUnit?.();
+      if (unit) return unit;
+    }
+    return me.targetUnit;
+  }
+
+  _pruneExpiredQueue() {
+    const now = wow.frameTime;
+    this._castQueue = this._castQueue.filter(e => now - e.timestamp < QUEUE_EXPIRY_MS);
+  }
+
+  _peekQueuedCast() {
+    this._pruneExpiredQueue();
+    return this._castQueue[0] || null;
+  }
+
+  _removeQueuedCast(baseId) {
+    this._castQueue = this._castQueue.filter(e => e.baseId !== baseId);
   }
 
   /**
@@ -107,40 +177,29 @@ class Spell extends wow.EventListener {
     }
 
     sequence.addChild(new bt.Action(() => {
-      // Check if there's a queued spell
-      const queuedSpell = CommandListener.getNextQueuedSpell();
-      if (queuedSpell) {
-        const spell = this.getSpell(queuedSpell.spellName);
-        const target = CommandListener.targetFunctions[queuedSpell.target]();
-
-        if (!target) {
-          console.info(`[SpellQueue] Target ${queuedSpell.target} not found for ${queuedSpell.spellName} — removing`);
-          CommandListener.removeSpellFromQueue(queuedSpell.spellName);
+      const queued = this._peekQueuedCast();
+      if (queued) {
+        const spell = this.getSpell(queued.baseId);
+        if (!spell) {
+          this._removeQueuedCast(queued.baseId);
           return bt.Status.Failure;
         }
+        if (me.isCastingOrChanneling) return bt.Status.Failure;
+        if (!this.canCast(spell, queued.target, options)) return bt.Status.Failure;
 
-        if (me.isCastingOrChanneling) {
-          return bt.Status.Failure;
-        }
-
-        // Use only canCast check, which includes range check
-        if (spell && this.canCast(spell, target, options)) {
-          spellToCast = queuedSpell.spellName;
-          this._currentTarget = target;
-          if (this.castPrimitive(spell, target)) {
-            return bt.Status.Success;
-          }
+        this._currentTarget = queued.target;
+        if (this.castPrimitive(spell, queued.target)) {
+          this._removeQueuedCast(queued.baseId);
+          return bt.Status.Success;
         }
         return bt.Status.Failure;
       }
 
-      // If no queued spell, proceed with normal targeting
       this._currentTarget = me.targetUnit;
       return bt.Status.Success;
     }));
 
-    // Only add the rest of the sequence if it wasn't a queued spell
-    if (!CommandListener.getNextQueuedSpell()) {
+    if (!this._peekQueuedCast()) {
       for (const arg of rest) {
         if (typeof arg === 'function') {
           sequence.addChild(new bt.Action(() => {
@@ -501,11 +560,14 @@ class Spell extends wow.EventListener {
             }
           }
 
-          if (shouldInterrupt && spell.cast(target)) {
-            const spellId = target.isChanneling ? target.currentChannel : target.currentCast;
-            const interruptTime = target.isChanneling ? `${channelTime.toFixed(2)}ms` : `${castPctRemain.toFixed(2)}%`;
-            console.info(`Interrupted ${spellId} using ${spell.name} being ${target.isChanneling ? 'channeled' : 'cast'} by: ${target.unsafeName} after ${interruptTime}`);
-            return bt.Status.Success;
+          if (shouldInterrupt) {
+            this._lastCastTimes.set(spell.id, wow.frameTime);
+            if (this.castPrimitive(spell, target)) {
+              const spellId = target.isChanneling ? target.currentChannel : target.currentCast;
+              const interruptTime = target.isChanneling ? `${channelTime.toFixed(2)}ms` : `${castPctRemain.toFixed(2)}%`;
+              console.info(`Interrupted ${spellId} using ${spell.name} being ${target.isChanneling ? 'channeled' : 'cast'} by: ${target.unsafeName} after ${interruptTime}`);
+              return bt.Status.Success;
+            }
           }
         }
         return bt.Status.Failure;
@@ -570,9 +632,12 @@ class Spell extends wow.EventListener {
               }
 
               // Try to cast the dispel if it's been long enough and meets the dispel criteria
-              if (shouldDispel && durationPassed > 777 && me.withinLineOfSight(unit) && spell.cast(unit)) {
-                console.info(`Cast dispel on ${unit.unsafeName} to remove ${aura.name} with priority ${dispelPriority}`);
-                return bt.Status.Success;
+              if (shouldDispel && durationPassed > 777 && me.withinLineOfSight(unit)) {
+                this._lastCastTimes.set(spell.id, wow.frameTime);
+                if (this.castPrimitive(spell, unit)) {
+                  console.info(`Cast dispel on ${unit.unsafeName} to remove ${aura.name} with priority ${dispelPriority}`);
+                  return bt.Status.Success;
+                }
               }
             }
           }

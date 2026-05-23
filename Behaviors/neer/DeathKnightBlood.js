@@ -12,10 +12,10 @@ import { UnitFlags } from "@/Enums/Flags";
 const auras = {
   bloodPlague: 55078,
   boneShield: 195181,
+  deathAndDecay: 188290,
+  crimsonScourge: 81141,
 };
 
-// Per TrinityCore UnitDefines.h: 0x01000000 = UNIT_FLAG_POSSESSED (charm/MC).
-// Flags.js mislabels this bit as PLAYER_CONTROLLED, so use the raw value.
 const UNIT_FLAG_POSSESSED = 0x01000000;
 
 const spells = {
@@ -43,22 +43,48 @@ export class DeathKnightBloodBehavior extends Behavior {
           common.waitForTarget(),
           common.waitForFacing(),
           common.ensureAutoAttack(),
-          spell.cast("Death Strike", on => combat.bestTarget, req => me.pctHealth < 90),
-          spell.cast("Marrowrend", on => combat.bestTarget, req => this.needMarrowrend()),
-          spell.cast("Death and Decay", on => combat.bestTarget, req => combat.targets.length > 1),
-          spell.cast("Blood Boil", on => combat.bestTarget, req => this.bloodBoilNeeded()),
-          spell.cast("Death Coil", on => combat.bestTarget, req => me.pctPowerByType(PowerType.RunicPower) >= 40),
-          spell.cast("Heart Strike", on => combat.bestTarget)
+          spell.cast("Death and Decay", on => me, req => {
+            const t = this.getTarget();
+            return me.hasAura(auras.crimsonScourge) && t && !t.isMoving();
+          }),
+          spell.cast("Death Strike", on => this.getTarget(), req =>
+            me.pctHealth < 60 || me.powerByType(PowerType.RunicPower) > 75
+          ),
+          spell.cast("Blood Boil", on => me, req => this.bloodBoilNeeded()),
+          spell.cast("Dancing Rune Weapon", on => me, req => combat.targets.length > 0),
+          spell.cast("Death Chain", on => this.findDeathChainTarget(), req => this.findDeathChainTarget() !== undefined),
+          spell.cast("Marrowrend", on => this.getTarget(), req => this.needMarrowrend()),
+          spell.cast("Death's Caress", on => this.getTarget(30), req => {
+            const t = this.getTarget(30);
+            return this.boneShieldExpiring() && t && !me.isWithinMeleeRange(t);
+          }),
+          spell.cast("Heart Strike", on => this.getTarget(), req => me.powerByType(PowerType.Runes) >= 2),
+          spell.cast("Blood Boil", on => me, req =>
+            spell.getCharges("Blood Boil") >= 1 &&
+            combat.targets.some(t => me.distanceTo(t) <= 10)
+          )
         )
       )
     );
   }
 
+  getTarget(distance) {
+    const inRange = distance === undefined
+      ? (t => me.isWithinMeleeRange(t))
+      : (t => me.distanceTo(t) <= distance);
+    const best = combat.bestTarget;
+    if (best && me.isFacing(best) && inRange(best)) {
+      return best;
+    }
+    const reachable = combat.targets.find(t => me.isFacing(t) && inRange(t));
+    return reachable || best;
+  }
+
   bloodBoilNeeded() {
     const missingPlague = combat.targets.find(t => me.distanceTo(t) <= 10 && !t.getAuraByMe(auras.bloodPlague));
     if (missingPlague) return true;
-    if (spell.getCharges("Blood Boil") >= 2) {
-      return combat.targets.find(t => me.distanceTo(t) <= 10);
+    if (spell.getChargesFractional("Blood Boil") >= 1.7) {
+      return combat.targets.some(t => me.distanceTo(t) <= 10);
     }
     return false;
   }
@@ -66,7 +92,21 @@ export class DeathKnightBloodBehavior extends Behavior {
   needMarrowrend() {
     const bs = me.getAura(auras.boneShield);
     if (!bs) return true;
-    return bs.stacks < 5 || bs.remaining < 6000;
+    return bs.stacks <= 6 || bs.remaining < 6000;
+  }
+
+  boneShieldExpiring() {
+    const bs = me.getAura(auras.boneShield);
+    if (!bs) return true;
+    return bs.remaining < 6000;
+  }
+
+  findDeathChainTarget() {
+    return combat.targets.find(t =>
+      me.distanceTo(t) <= 30 &&
+      me.isFacing(t) &&
+      combat.targets.filter(other => other !== t && other.distanceTo(t) <= 8).length >= 2
+    );
   }
 
   findTauntTarget() {
