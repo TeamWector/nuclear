@@ -398,6 +398,8 @@ const treasures = {
   376580: "treasure", // Dragonflight treasure
   // Emerald Dream
   411465: "treasure", // Unwaking Echo
+  // Legion
+  240519: "treasure", // Legion treasure
   // MoP Remix
   214945: "treasure", // Onyx Egg
   213180: "treasure", // Guo-Lai runestone
