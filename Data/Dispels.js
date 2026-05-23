@@ -46,7 +46,16 @@ export const dispels = {
   59237: DispelPriority.Low,  // Hunter's mark
   59271: DispelPriority.Low,  // Poison breath
   59334: DispelPriority.Low,  // Poison Spear
-  49106: DispelPriority.Low,  // Fear
+  49106: DispelPriority.Low,  // Fear (different ID)
+  59168: DispelPriority.Low,  // Light shock
+  59178: DispelPriority.Low,  // Poison Spear in HOL
+  58967: DispelPriority.Low,  // Poison Spear
+  13323: DispelPriority.Low,  // Polymorph
+  59237: DispelPriority.Low,  // Hunter's mark
+  59271: DispelPriority.Low,  // Poison breath
+  59334: DispelPriority.Low,  // Poison Spear
+  49106: DispelPriority.Low,  // Fear (old ID)
+  5782: DispelPriority.High,  // Fear (Warlock)
   59300: DispelPriority.Low,  // Fetid Rot
   67710: DispelPriority.Low,  // Poison
   34942: DispelPriority.Low,  // SWP
@@ -354,7 +363,7 @@ export const dispels = {
   3355: DispelPriority.High, // Hunter - Freezing Trap
   19386: DispelPriority.High, // Hunter - Wyvern Sting
   342246: DispelPriority.High, // Mage - Alter Time
-  31661: DispelPriority.Medium, // Mage - Dragon's Breath
+  31661: DispelPriority.High, // Mage - Dragon's Breath
   122: DispelPriority.Medium, // Mage - Frost Nova
   61305: DispelPriority.High, // Mage - Polymorph (Cat)
   161354: DispelPriority.High, // Mage - Polymorph (Monkey)
@@ -366,6 +375,17 @@ export const dispels = {
   118: DispelPriority.High, // Mage - Polymorph (Sheep)
   61780: DispelPriority.High, // Mage - Polymorph (Turkey)
   28271: DispelPriority.High, // Mage - Polymorph (Turtle)
+  277787: DispelPriority.High, // Mage - Polymorph (Direhorn)
+  277792: DispelPriority.High, // Mage - Polymorph (Bumblebee)
+  391622: DispelPriority.High, // Mage - Polymorph (Duck)
+  321395: DispelPriority.High, // Mage - Polymorph (Mawrat)
+  460392: DispelPriority.High, // Mage - Polymorph (Mosswool)
+  461489: DispelPriority.High, // Mage - Polymorph (Mosswool 2)
+  383121: DispelPriority.High, // Mage - Mass Polymorph
+  269352: DispelPriority.High, // Shaman - Hex (Skeletal Hatchling)
+  277778: DispelPriority.High, // Shaman - Hex (Zandalari Tendonripper)
+  277784: DispelPriority.High, // Shaman - Hex (Wicker Mongrel)
+  309328: DispelPriority.High, // Shaman - Hex (Living Honey)
   20066: DispelPriority.High, // Paladin - Repentance
   853: DispelPriority.High, // Paladin - Hammer of Justice
   8122: DispelPriority.High, // Priest - Psychic Scream
@@ -382,6 +402,26 @@ export const dispels = {
   5484: DispelPriority.Medium, // Warlock - Howl of Terror
   710: DispelPriority.Medium, // Warlock - Banish
   378464: DispelPriority.Medium, // Evoker - Nullifying Shroud
+  33786: DispelPriority.High, // Druid - Cyclone
+  360806: DispelPriority.High, // Priest - Sleep Walk
+  5246: DispelPriority.High, // Warrior - Intimidating Shout
+  316593: DispelPriority.High, // Warrior - Intimidating Shout (Menace)
+  316595: DispelPriority.High, // Warrior - Intimidating Shout (Menace 2)
+  1513: DispelPriority.High, // Hunter - Scare Beast
+  105421: DispelPriority.High, // Paladin - Blinding Light
+  207685: DispelPriority.High, // DH - Sigil of Misery
+  207167: DispelPriority.High, // DK - Blinding Sleet
+  6358: DispelPriority.High, // Warlock - Seduction
+  261589: DispelPriority.High, // Warlock - Seduction (Pet)
+  10326: DispelPriority.High, // Paladin - Turn Evil
+  198909: DispelPriority.High, // Monk - Song of Chi-ji
+  99: DispelPriority.High, // Druid - Incapacitating Roar
+  217832: DispelPriority.High, // DH - Imprison (Honor)
+  221527: DispelPriority.High, // DH - Imprison (Honor 2)
+  378441: DispelPriority.High, // Mage - Time Stop
+  115078: DispelPriority.High, // Monk - Paralysis
+  357768: DispelPriority.High, // Monk - Paralysis 2
+  107079: DispelPriority.High, // Monk - Quaking Palm
   // 34914: DispelPriority.High, // Priest - Vampiric Touch - you dispel this, you get 4sec back lash silence, no DR. WHAT!?
   209749: DispelPriority.High // Druid - Faerie Swarm
 };
