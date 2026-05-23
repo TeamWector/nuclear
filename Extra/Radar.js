@@ -7,17 +7,33 @@ import { Classification } from '@/Enums/UnitEnums';
 import { UnitFlags, UnitFlags2, UnitFlags3, NpcFlags, DynamicFlags } from '@/Enums/Flags';
 import { GameObjectType } from '@/Enums/GameObjectType';
 
-// Goobers (GO type 10) in this state with goUsable=true are quest-interactable props
-// (clickable orbs, levers, etc.) that aren't flagged as isLootable. The NO_INTERACT dynamic
-// flag distinguishes the noisy non-clickable variants (0x80 set) from real interactables.
-const GOOBER_QUEST_STATE = 17;
+// Bits the server sets on dynamicFlags to say "this GO is not currently clickable for you":
+//   NO_INTERACT   (0x0080) - hard "no"
+//   INTERACT_COND (0x0200) - blocked until the server also sets ACTIVATE (0x0004); seen on
+//                            chests/objects gated by quest/phase conditions
 const GO_DYNFLAG_LO_NO_INTERACT = 0x0080;
+const GO_DYNFLAG_LO_INTERACT_COND = 0x0200;
+const GO_DYNFLAG_LO_BLOCKED_MASK = GO_DYNFLAG_LO_NO_INTERACT | GO_DYNFLAG_LO_INTERACT_COND;
+
+function isCurrentlyClickable(obj) {
+  return obj.goUsable === true && (obj.dynamicFlags & GO_DYNFLAG_LO_BLOCKED_MASK) === 0;
+}
+
+// Goobers (GO type 10) in this state are typically quest-interactable props (clickable orbs,
+// levers, etc.) that aren't flagged as isLootable. Filter to the ones the server is currently
+// allowing interaction with.
+const GOOBER_QUEST_STATE = 17;
 
 function isGooberQuestObjective(obj) {
   return obj.goType === GameObjectType.Goober
     && obj.goState === GOOBER_QUEST_STATE
-    && obj.goUsable === true
-    && (obj.dynamicFlags & GO_DYNFLAG_LO_NO_INTERACT) === 0;
+    && isCurrentlyClickable(obj);
+}
+
+// Chests (GO type 3) that the server is currently allowing interaction with count as
+// treasures even when not in the hand-curated Gatherables.treasure list.
+function isInteractableChest(obj) {
+  return obj.goType === GameObjectType.Chest && isCurrentlyClickable(obj);
 }
 
 const objectColors = {
@@ -125,6 +141,7 @@ class Radar {
         if (Gatherables.herb[obj.entryId]) buckets.herbs.push(entry);
         else if (Gatherables.ore[obj.entryId]) buckets.ores.push(entry);
         else if (Gatherables.treasure[obj.entryId]) buckets.treasures.push(entry);
+        else if (isInteractableChest(obj)) buckets.treasures.push(entry);
         else if (obj.isLootable) buckets.quests.push(entry);
         else if (isGooberQuestObjective(obj)) buckets.quests.push(entry);
         else buckets.everything.push(entry);
@@ -171,7 +188,7 @@ class Radar {
       } else if (Gatherables.ore[obj.entryId]) {
         prefix = '[V] ';
         prefixColor = colors.orange;
-      } else if (Gatherables.treasure[obj.entryId]) {
+      } else if (Gatherables.treasure[obj.entryId] || isInteractableChest(obj)) {
         prefix = '[T] ';
         prefixColor = colors.silver;
       } else if (obj.isLootable || isGooberQuestObjective(obj)) {
@@ -195,9 +212,10 @@ class Radar {
     }
     if (Settings.ExtraRadarDrawDebug) {
       text += ` [ID: ${obj.entryId}]`;
-      if (obj instanceof wow.CGGameObject && obj.goType === GameObjectType.Goober) {
+      if (obj instanceof wow.CGGameObject
+        && (obj.goType === GameObjectType.Goober || obj.goType === GameObjectType.Chest)) {
         const hex = v => `0x${((v ?? 0) >>> 0).toString(16)}`;
-        text += ` state=${obj.goState} goF=${hex(obj.goFlags)} dynF=${hex(obj.dynamicFlags)} use=${obj.goUsable ? 1 : 0}`;
+        text += ` type=${obj.goType} state=${obj.goState} goF=${hex(obj.goFlags)} dynF=${hex(obj.dynamicFlags)} use=${obj.goUsable ? 1 : 0}`;
       }
     }
 
