@@ -14,7 +14,7 @@ const auras = {
   felDomination: 333889,
   immolate: 157736,
   backdraft: 117828,
-  infernalBeneficiary: 1265810,
+  shadowburnFree: 1245664,
 };
 
 const spells = {
@@ -26,6 +26,25 @@ const spells = {
     Succubus: 712,
   },
 };
+
+const BURNING_RUSH_MOVE_THRESHOLD_MS = 1000;
+let moveStartFrameTime = 0;
+let lastMoveSampleFrame = -1;
+
+function sampleMovement() {
+  if (lastMoveSampleFrame === wow.frameTime) return;
+  lastMoveSampleFrame = wow.frameTime;
+  if (!me.isMoving()) {
+    moveStartFrameTime = 0;
+  } else if (moveStartFrameTime === 0) {
+    moveStartFrameTime = wow.frameTime;
+  }
+}
+
+function hasBeenMovingFor(ms) {
+  sampleMovement();
+  return moveStartFrameTime !== 0 && (wow.frameTime - moveStartFrameTime) >= ms;
+}
 
 export class WarlockDestructionBehavior extends Behavior {
   name = "Warlock [Destruction]";
@@ -48,7 +67,14 @@ export class WarlockDestructionBehavior extends Behavior {
     {
       header: "Self Healing",
       options: [
-        { type: "slider", uid: "DestructionDrainLifeHp", text: "Drain Life HP %", min: 1, max: 100, default: 80 }
+        { type: "slider", uid: "DestructionDrainLifeHp", text: "Drain Life HP %", min: 1, max: 100, default: 80 },
+        { type: "slider", uid: "DestructionPetDrainLifeHp", text: "Drain Life Pet HP %", min: 0, max: 100, default: 50 }
+      ]
+    },
+    {
+      header: "AoE",
+      options: [
+        { type: "slider", uid: "DestructionAoEThreshold", text: "AoE Target Count", min: 2, max: 8, default: 3 }
       ]
     }
   ];
@@ -58,13 +84,7 @@ export class WarlockDestructionBehavior extends Behavior {
       common.waitForNotMounted(),
       common.waitForNotSitting(),
       new bt.Decorator(
-        () => {
-          if (me.spellInfo?.spellChannelId !== spells.drainLife) return false;
-          if (me.pctHealth < 100) return false;
-          if (!me.hasAura(auras.infernalBeneficiary)) return true;
-          const pet = Pet.current;
-          return !pet || !Pet.isAlive() || pet.pctHealth >= 100;
-        },
+        () => this.shouldStopDrainLife(),
         new bt.Action(() => {
           me.stopCasting();
           return bt.Status.Success;
@@ -77,6 +97,13 @@ export class WarlockDestructionBehavior extends Behavior {
           return bt.Status.Success;
         })
       ),
+      new bt.Decorator(
+        () => me.hasAura(auras.burningRush) && (me.pctHealth < 50 || !me.isMoving()),
+        new bt.Action(() => {
+          me.cancelAura(auras.burningRush);
+          return bt.Status.Success;
+        })
+      ),
       spell.cast("Fel Domination", on => me, req =>
         me.inCombat() && !Pet.isAlive() && !me.hasAura(auras.felDomination)
       ),
@@ -84,34 +111,84 @@ export class WarlockDestructionBehavior extends Behavior {
       this.summonSelectedPet(),
       this.petAttackMyAttacker(),
       Pet.follow(() => !me.targetUnit && !me.inCombat() && !combat.bestTarget),
+      new bt.Decorator(
+        ret => !spell.isGlobalCooldown(),
+        spell.cast("Burning Rush", on => me, req =>
+          hasBeenMovingFor(BURNING_RUSH_MOVE_THRESHOLD_MS) && me.pctHealth > 50 && !me.hasAura(auras.burningRush)
+        )
+      ),
+      new bt.Decorator(
+        ret => !spell.isGlobalCooldown() && this.shouldDrainLife(),
+        spell.cast("Drain Life", on => me.targetUnit || combat.bestTarget, req =>
+          !!(me.targetUnit || combat.bestTarget)
+        )
+      ),
       common.waitForTarget(),
       common.waitForFacing(),
       new bt.Decorator(
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
-          spell.cast("Drain Life", on => combat.bestTarget, req => {
-            if (!combat.bestTarget) return false;
-            const threshold = Settings.DestructionDrainLifeHp ?? 80;
-            if (me.pctHealth < threshold) return true;
-            if (!me.hasAura(auras.infernalBeneficiary)) return false;
-            const pet = Pet.current;
-            return pet && Pet.isAlive() && pet.pctHealth < threshold;
-          }),
           spell.cast("Immolate", on => combat.bestTarget, req => this.needsImmolate(combat.bestTarget)),
-          spell.cast("Rain of Fire", on => this.rainOfFireTarget(), req =>
-            me.powerByType(PowerType.SoulShards) >= 3 && this.rainOfFireTarget() !== null
+          spell.cast("Summon Infernal", on => combat.bestTarget, req =>
+            combat.burstToggle && combat.bestTarget
           ),
-          spell.cast("Conflagrate", on => combat.bestTarget, req =>
-            combat.bestTarget && !me.hasAura(auras.backdraft)
+          spell.cast("Cataclysm", on => this.cataclysmTarget(), req =>
+            combat.targets.length >= this.aoeThreshold() && this.cataclysmTarget() !== null
+          ),
+          spell.cast("Malevolence", on => combat.bestTarget, req =>
+            combat.burstToggle && combat.bestTarget
+          ),
+          spell.cast("Shadowburn", on => combat.bestTarget, req => {
+            if (!combat.bestTarget) return false;
+            if (me.hasAura(auras.shadowburnFree)) return true;
+            return combat.bestTarget.pctHealth < 20
+              && combat.targets.length < this.aoeThreshold();
+          }),
+          spell.cast("Rain of Fire", on => this.rainOfFireTarget(), req =>
+            combat.targets.length >= this.aoeThreshold()
+            && me.powerByType(PowerType.SoulShards) >= 3
+            && this.rainOfFireTarget() !== null
           ),
           spell.cast("Chaos Bolt", on => combat.bestTarget, req =>
-            combat.bestTarget && combat.bestTarget.pctHealth > 50 &&
-            me.powerByType(PowerType.SoulShards) >= 2
+            combat.bestTarget && me.powerByType(PowerType.SoulShards) >= 2
           ),
+          spell.cast("Soul Fire", on => combat.bestTarget, req => combat.bestTarget),
+          spell.cast("Conflagrate", on => combat.bestTarget, req => combat.bestTarget),
           spell.cast("Incinerate", on => combat.bestTarget)
         )
       )
     );
+  }
+
+  aoeThreshold() {
+    return Settings.DestructionAoEThreshold ?? 3;
+  }
+
+  shouldDrainLife() {
+    if (me.pctHealth < (Settings.DestructionDrainLifeHp ?? 80)) return true;
+    const pet = Pet.current;
+    return !!(pet && Pet.isAlive() && pet.pctHealth < (Settings.DestructionPetDrainLifeHp ?? 50));
+  }
+
+  shouldStopDrainLife() {
+    if (me.spellInfo?.spellChannelId !== spells.drainLife) return false;
+    if (me.pctHealth < 100) return false;
+    const pet = Pet.current;
+    if (pet && Pet.isAlive() && pet.pctHealth < 100) return false;
+    return true;
+  }
+
+  cataclysmTarget() {
+    let best = null;
+    let bestCount = this.aoeThreshold() - 1;
+    for (const t of combat.targets) {
+      const count = combat.getUnitsAroundUnit(t, 8).length;
+      if (count > bestCount) {
+        bestCount = count;
+        best = t;
+      }
+    }
+    return best;
   }
 
   needsImmolate(target) {
@@ -123,7 +200,7 @@ export class WarlockDestructionBehavior extends Behavior {
 
   rainOfFireTarget() {
     let best = null;
-    let bestCount = 5;
+    let bestCount = this.aoeThreshold() - 1;
     for (const t of combat.targets) {
       const count = combat.getUnitsAroundUnit(t, 8).length;
       if (count > bestCount) {
