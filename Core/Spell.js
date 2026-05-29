@@ -7,8 +7,6 @@ import { interrupts } from '@/Data/Interrupts';
 import Settings from './Settings';
 import { defaultHealTargeting as heal } from '@/Targeting/HealTargeting';
 import { defaultCombatTargeting as combat } from '@/Targeting/CombatTargeting';
-const NUCLEAR_MATCH_WINDOW_MS = 500;
-const QUEUE_EXPIRY_MS = 2000;
 
 class Spell extends wow.EventListener {
   constructor() {
@@ -18,7 +16,6 @@ class Spell extends wow.EventListener {
     this._lastSuccessfulCastTimes = new Map();
     this._lastNonInstantCastTime = 0;
     this._lastSuccessfulSpells = []; // Array to store the last successful spells
-    this._castQueue = [];
   }
 
   /** @type {{get: function(): (wow.CGUnit|undefined)}} */
@@ -47,15 +44,6 @@ class Spell extends wow.EventListener {
     let castSpell = null;
     try { castSpell = new wow.Spell(spellId); } catch {}
 
-    // _lastCastTimes is keyed on the base spell.id (getSpell collapses overrides);
-    // CLEU args[0] can be the override id, so normalize before lookup.
-    const baseId = this.getSpell(spellId)?.id ?? spellId;
-    // castEx records the timestamp at cast start; SPELL_CAST_SUCCESS fires
-    // after castTime ms — widen the window so non-instants still match.
-    const recent = this._lastCastTimes.get(baseId);
-    const windowMs = NUCLEAR_MATCH_WINDOW_MS + (castSpell?.castTime || 0);
-    const fromNuclear = !!(recent && (wow.frameTime - recent) < windowMs);
-
     if (eventType === 6) { // SPELL_CAST_SUCCESS
       const spellName = (castSpell?.name || "").toLowerCase();
       const targetName = eventData.target ? eventData.target.unsafeName : "Unknown";
@@ -74,71 +62,7 @@ class Spell extends wow.EventListener {
       if (this._lastSuccessfulSpells.length > 10) {
         this._lastSuccessfulSpells.shift();
       }
-
-      // A queued cast finally went through — drop it.
-      this._removeQueuedCast(baseId);
     }
-
-    if (eventType === 7 && !fromNuclear) { // SPELL_CAST_FAILED from the player, not us
-      this._enqueueManualCast(baseId, castSpell, eventData);
-    }
-  }
-
-  /**
-   * Diagnostic: log player-sourced cast CLEU events to the WoW chat frame.
-   * Tags each event as `nuclear` (matches a _lastCastTimes record within
-   * NUCLEAR_MATCH_WINDOW_MS) or `manual` otherwise — used to design auto-queue
-   * for manual casts that happen during nuclear's GCDs.
-   *
-   * @param {number} eventType - CLEU eventType (4 START, 6 SUCCESS, 7 FAILED, ...)
-   * @param {number | undefined} spellId - args[0] of the CLEU event.
-   * @param {Object} eventData - Raw CLEU event data.
-   */
-  /**
-   * Enqueue a manual cast attempt (player CLEU SPELL_CAST_FAILED not initiated
-   * by nuclear). Drained on the next `cast()` tick.
-   */
-  _enqueueManualCast(baseId, castSpell, eventData) {
-    if (!castSpell?.name) return;
-    const spell = this.getSpell(baseId);
-    if (!spell || !spell.isKnown) return;
-    if (spell.cooldown && spell.cooldown.timeleft > 1500) return;
-    if (this._castQueue.some(e => e.baseId === baseId)) return;
-
-    const target = this._resolveCastTarget(eventData);
-    if (!target) return;
-
-    this._castQueue.push({
-      baseId,
-      name: castSpell.name,
-      target,
-      timestamp: wow.frameTime,
-    });
-  }
-
-  _resolveCastTarget(eventData) {
-    if (eventData.target instanceof wow.CGUnit) return eventData.target;
-    const destGuid = eventData.destination?.guid;
-    if (destGuid && destGuid.toString() !== "0:0 (0)") {
-      if (me.guid.equals(destGuid)) return me;
-      const unit = destGuid.toUnit?.();
-      if (unit) return unit;
-    }
-    return me.targetUnit;
-  }
-
-  _pruneExpiredQueue() {
-    const now = wow.frameTime;
-    this._castQueue = this._castQueue.filter(e => now - e.timestamp < QUEUE_EXPIRY_MS);
-  }
-
-  _peekQueuedCast() {
-    this._pruneExpiredQueue();
-    return this._castQueue[0] || null;
-  }
-
-  _removeQueuedCast(baseId) {
-    this._castQueue = this._castQueue.filter(e => e.baseId !== baseId);
   }
 
   /**
@@ -176,52 +100,32 @@ class Spell extends wow.EventListener {
     }
 
     sequence.addChild(new bt.Action(() => {
-      const queued = this._peekQueuedCast();
-      if (queued) {
-        const spell = this.getSpell(queued.baseId);
-        if (!spell) {
-          this._removeQueuedCast(queued.baseId);
-          return bt.Status.Failure;
-        }
-        if (me.isCastingOrChanneling) return bt.Status.Failure;
-        if (!this.canCast(spell, queued.target, options)) return bt.Status.Failure;
-
-        this._currentTarget = queued.target;
-        if (this.castPrimitive(spell, queued.target)) {
-          this._removeQueuedCast(queued.baseId);
-          return bt.Status.Success;
-        }
-        return bt.Status.Failure;
-      }
-
       this._currentTarget = me.targetUnit;
       return bt.Status.Success;
     }));
 
-    if (!this._peekQueuedCast()) {
-      for (const arg of rest) {
-        if (typeof arg === 'function') {
-          sequence.addChild(new bt.Action(() => {
-            const r = arg();
-            if (r === false || r === undefined || r === null) {
-              return bt.Status.Failure;
-            } else if (r instanceof wow.CGUnit || r instanceof wow.Guid) {
-              this._currentTarget = r;
-            }
-            return bt.Status.Success;
-          }));
-        } else {
-          try {
-            throw new Error(`Invalid argument passed to Spell.cast: expected function got ${typeof arg}`);
-          } catch (e) {
-            console.warn(e.message);
-            console.warn(e.stack.split('\n')[1]);
+    for (const arg of rest) {
+      if (typeof arg === 'function') {
+        sequence.addChild(new bt.Action(() => {
+          const r = arg();
+          if (r === false || r === undefined || r === null) {
+            return bt.Status.Failure;
+          } else if (r instanceof wow.CGUnit || r instanceof wow.Guid) {
+            this._currentTarget = r;
           }
+          return bt.Status.Success;
+        }));
+      } else {
+        try {
+          throw new Error(`Invalid argument passed to Spell.cast: expected function got ${typeof arg}`);
+        } catch (e) {
+          console.warn(e.message);
+          console.warn(e.stack.split('\n')[1]);
         }
       }
-
-      sequence.addChild(this.castEx(spellToCast, options));
     }
+
+    sequence.addChild(this.castEx(spellToCast, options));
 
     return sequence;
   }

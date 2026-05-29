@@ -7,24 +7,98 @@ import { Classification } from '@/Enums/UnitEnums';
 import { UnitFlags, UnitFlags2, UnitFlags3, NpcFlags, DynamicFlags } from '@/Enums/Flags';
 import { GameObjectType } from '@/Enums/GameObjectType';
 
-// Bits on dynamicFlags relevant to interactability (low word, GO-specific layout):
-//   INTERACT_READY (0x0020) - server says "currently clickable for you"; flips off when
-//                             the chest/objective has been used or looted. Observed across
-//                             chests (interact: dynF=0xc024, used: dynF=0x8000) and Goober
-//                             quest objects (interact: dynF=0xc020). Bit 0x0004 also appears
-//                             on some clickable chests but is NOT present on clickable
-//                             Goobers, so 0x0020 is the more reliable signal.
-//   NO_INTERACT    (0x0080) - hard "no"
-//   INTERACT_COND  (0x0200) - conditionally blocked until the server also sets INTERACT_READY
+// dynamicFlags bits (low word, GO-specific layout):
+//   INTERACT_READY (0x0020) - server says "currently clickable for you"
+//   NO_INTERACT    (0x0080) - hard "no, never clickable"
+//   INTERACT_COND  (0x0200) - interaction is conditional. NOT a universal block
+//     (lootable objects set it while clickable), but for a NON-lootable goober a
+//     set bit means "not interactable" (Campfire / depleted Pedestal 0x8200).
+//   ACTIVE         (0x8000) - object currently offers interaction; a chest/stash
+//     clears it (dynF -> 0x0) when emptied (goUsable is unreliable — it flickers).
+//
+// goFlags bits (persistent GO state):
+//   GO_FLAG_INTERACT_COND (0x0004) - "needs conditions met to interact" — set
+//     on chests/objects gated by an active quest or other prerequisite.
+//     Observed on non-interactable chests (e.g. Gnoll Orders goF=0x204004,
+//     other goF=0x4); interactable treasures have this bit clear (e.g.
+//     Silverbound Treasure Chest goF=0x0).
+//
+// Chests and Goobers both sit with goUsable=true before INTERACT_READY (0x0020)
+// is set, and on this server that bit is unreliable — it appears only when very
+// close (chests) or not at all (quest goobers). Requiring it hid distant
+// treasures and left quest goobers permanently un-clickable, so we do NOT require
+// INTERACT_READY. Interactability is gated by goUsable plus the real "blocked"
+// signals (NO_INTERACT on dynamicFlags, INTERACT_COND on goFlags). Two flag-only
+// "not usable" patterns, no bookkeeping: (1) USED/EMPTIED objects clear the ACTIVE
+// 0x8000 bit (chest 0x8000 -> 0x0, used goober 0xc204 -> 0x200); (2) IDLE / not-
+// currently-usable objects keep 0x8000 but set INTERACT_COND 0x0200 (Campfire /
+// Catapult / idle Pedestal 0x8200 vs ready Druid Stone 0x8000). Lootable objects
+// (loot=1, full Pedestal/Catapult 0xc204) are usable regardless. Net rule:
+//   usable = goUsable AND ACTIVE set AND (isLootable OR INTERACT_COND clear).
 const GO_DYNFLAG_LO_INTERACT_READY = 0x0020;
 const GO_DYNFLAG_LO_NO_INTERACT = 0x0080;
 const GO_DYNFLAG_LO_INTERACT_COND = 0x0200;
-const GO_DYNFLAG_LO_BLOCKED_MASK = GO_DYNFLAG_LO_NO_INTERACT | GO_DYNFLAG_LO_INTERACT_COND;
+// ACTIVE: set while an object currently offers interaction; CLEARED once it's been
+// used/emptied — a chest zeroes dynamicFlags (0x8000 -> 0x0) and a used goober
+// drops the bit too (Ogre Runestone 0xc204 -> 0x200). goUsable is unreliable (it
+// flickers back to 1 on a looted chest), so this is the signal for "already used".
+const GO_DYNFLAG_LO_ACTIVE = 0x8000;
+// NO_INTERACT is the only UNIVERSAL hard block. INTERACT_COND (0x0200) is excluded
+// here because lootable objects set it while still clickable (e.g. a full Ritual
+// Pedestal, 0xc204). It IS used goober-specifically as the "not interactable"
+// signal for NON-lootable goobers — see isCurrentlyClickable.
+const GO_DYNFLAG_LO_BLOCKED_MASK = GO_DYNFLAG_LO_NO_INTERACT;
+const GO_FLAG_INTERACT_COND = 0x0004;
+// NOT_SELECTABLE: the object can't be selected/clicked at all (rafts, vehicles,
+// scenery). Genuine interactables never set it — observed on the Raft (goF=0x10),
+// while every real clickable carried 0x40000 and no 0x10.
+const GO_FLAG_NOT_SELECTABLE = 0x0010;
 
 function isCurrentlyClickable(obj) {
-  return obj.goUsable === true
-    && (obj.dynamicFlags & GO_DYNFLAG_LO_INTERACT_READY) !== 0
-    && (obj.dynamicFlags & GO_DYNFLAG_LO_BLOCKED_MASK) === 0;
+  if (obj.goUsable !== true) return false;
+  // NOT_SELECTABLE => can't be clicked at all (rafts/vehicles/scenery, e.g. Raft
+  // goF=0x10). Genuine interactables never set this.
+  if ((obj.goFlags & GO_FLAG_NOT_SELECTABLE) !== 0) return false;
+  if ((obj.dynamicFlags & GO_DYNFLAG_LO_BLOCKED_MASK) !== 0) return false;
+  // Must currently be ACTIVE: set on ready objects, cleared once used/emptied
+  // (chest dynF -> 0x0, used goober 0xc204 -> 0x200). goUsable flickers back to 1
+  // on a looted chest, so this is what reliably drops finished objects.
+  if ((obj.dynamicFlags & GO_DYNFLAG_LO_ACTIVE) === 0) return false;
+  const interactReady = (obj.dynamicFlags & GO_DYNFLAG_LO_INTERACT_READY) !== 0;
+  // INTERACT_READY is the server's runtime "clickable right now" signal and
+  // overrides the persistent GO_FLAG_INTERACT_COND heuristic — observed on
+  // quest chests with goF=0x4 + dynF having 0x20, which ARE openable.
+  if (!interactReady && (obj.goFlags & GO_FLAG_INTERACT_COND) !== 0) return false;
+  // Goobers: a NON-lootable goober is interactable only while dynamicFlags 0x0200
+  // (INTERACT_COND) is CLEAR — clear = usable (Druid Stone 0x8000), set = not
+  // (Campfire / depleted Ritual Pedestal 0x8200). Lootable goobers (loot=1, e.g. a
+  // full Pedestal 0xc204) are usable regardless; the loot flag is their signal.
+  if (obj.goType === GameObjectType.Goober
+      && obj.isLootable !== true
+      && (obj.dynamicFlags & GO_DYNFLAG_LO_INTERACT_COND) !== 0) return false;
+  return true;
+}
+
+// DEBUG twin of isCurrentlyClickable + the interact-loop gates: returns the first
+// reason the interact loop in tick() would skip this GO, or null if it would fire.
+// Keep in sync with isCurrentlyClickable() and the loop below.
+function interactSkipReason(obj) {
+  if (!(obj instanceof wow.CGGameObject)) return "not a CGGameObject";
+  if (!me.withinInteractRange(obj)) return "out of interact range";
+  if (obj.goUsable !== true) return "goUsable != true";
+  if ((obj.goFlags & GO_FLAG_NOT_SELECTABLE) !== 0) return "goFlags NOT_SELECTABLE (0x10) — not clickable";
+  if ((obj.dynamicFlags & GO_DYNFLAG_LO_BLOCKED_MASK) !== 0) return "dynamicFlags NO_INTERACT (0x80)";
+  if ((obj.dynamicFlags & GO_DYNFLAG_LO_ACTIVE) === 0) return "not ACTIVE (dynF 0x8000 clear — used/emptied)";
+  const interactReady = (obj.dynamicFlags & GO_DYNFLAG_LO_INTERACT_READY) !== 0;
+  if (!interactReady && (obj.goFlags & GO_FLAG_INTERACT_COND) !== 0) return "goFlags INTERACT_COND (0x4) & not ready";
+  if (obj.goType === GameObjectType.Goober && obj.isLootable !== true
+      && (obj.dynamicFlags & GO_DYNFLAG_LO_INTERACT_COND) !== 0) return "non-lootable goober, INTERACT_COND 0x200 set (not interactable)";
+  return null;
+}
+
+// Resolve a spell id to its name for debug logging (safe if the id is bogus).
+function radarSpellName(id) {
+  try { return new wow.Spell(id)?.name ?? `${id}`; } catch { return `${id}`; }
 }
 
 // Goobers (GO type 10) are quest-interactable props: clickable orbs, levers, switches, etc.
@@ -35,11 +109,20 @@ function isGooberQuestObjective(obj) {
   return obj.goType === GameObjectType.Goober && isCurrentlyClickable(obj);
 }
 
-// Clickable chests (GO type 3) that aren't in the hand-curated Gatherables.treasure list
-// are almost always quest items in practice (e.g. campaign chests, world-quest objectives),
-// so we bucket them under quests rather than treasures.
+// Clickable chests (GO type 3) split by name:
+//   - Anything with "Chest" in its name → treasure (covers Small Treasure Chest,
+//     Silverbound Treasure Chest, Iron-Bound Chest, etc.)
+//   - Anything else → quest (campaign objectives, world-quest props, etc.)
+function isTreasureNameChest(obj) {
+  return obj.goType === GameObjectType.Chest
+    && (obj.name || "").includes("Chest")
+    && isCurrentlyClickable(obj);
+}
+
 function isInteractableQuestChest(obj) {
-  return obj.goType === GameObjectType.Chest && isCurrentlyClickable(obj);
+  return obj.goType === GameObjectType.Chest
+    && !(obj.name || "").includes("Chest")
+    && isCurrentlyClickable(obj);
 }
 
 const objectColors = {
@@ -70,6 +153,18 @@ const CATEGORY_DRAW = {
 };
 
 const CATEGORY_ORDER = ['quests', 'herbs', 'ores', 'treasures', 'rares'];
+
+// Safety timeout for silently-swallowed interacts (e.g. server rejects because
+// you're in combat — no cast, no failure event). The timeout is suppressed
+// while me.isCasting is true, so it only fires when nothing at all is happening.
+const INTERACT_PENDING_TIMEOUT_MS = 750;
+
+// Brief grace after our last interact() before we'll fire on the same GUID
+// again. Covers the window where the server hasn't yet flipped the GO's
+// dynamic flags after a completed loot (so the obj is briefly still in
+// trackedEntries even though it's done), and prevents instant re-fire on the
+// same target right after an interrupt.
+const SAME_GUID_GRACE_MS = 500;
 
 const cmpDist = (a, b) => a.distSqr - b.distSqr;
 
@@ -104,6 +199,27 @@ class Radar {
   ];
 
   static tabName = "Radar";
+
+  // Bumped both when we send interact() AND when pending resolves, so the
+  // SAME_GUID_GRACE_MS window measures "time since last activity on this GUID"
+  // — meaning the grace starts at cast-end, not cast-start.
+  static lastInteractAt = 0;
+  // guid.hash (BigInt) of the GO we last called interact() on — used to
+  // enforce SAME_GUID_GRACE_MS.
+  static lastInteractedGuidHash = null;
+  // Full guid of that GO, so cast events can be matched against the interact target.
+  static lastInteractedGuid = null;
+  // True between obj.interact() and the signal that resolves it (cast end,
+  // LOOT_CLOSED, or safety timeout).
+  static interactPending = false;
+  // castGUID of the cast we triggered (captured on UNIT_SPELLCAST_START while
+  // pending). Lets us ignore any other casts the player fires in the meantime.
+  static pendingCastGUID = null;
+  // Previous tick's me.isCasting, used to detect the T→F transition that
+  // signals our cast has ended (success or interrupt).
+  static wasCasting = false;
+  // Throttle (ms timestamp) for the interact debug dump below.
+  static _lastInteractDebugAt = 0;
 
   static renderOptions(renderFunction) {
     renderFunction([
@@ -147,6 +263,7 @@ class Radar {
         if (Gatherables.herb[obj.entryId]) buckets.herbs.push(entry);
         else if (Gatherables.ore[obj.entryId]) buckets.ores.push(entry);
         else if (Gatherables.treasure[obj.entryId] && isCurrentlyClickable(obj)) buckets.treasures.push(entry);
+        else if (isTreasureNameChest(obj)) buckets.treasures.push(entry);
         else if (isInteractableQuestChest(obj)) buckets.quests.push(entry);
         else if (obj.isLootable) buckets.quests.push(entry);
         else if (isGooberQuestObjective(obj)) buckets.quests.push(entry);
@@ -194,7 +311,8 @@ class Radar {
       } else if (Gatherables.ore[obj.entryId]) {
         prefix = '[V] ';
         prefixColor = colors.orange;
-      } else if (Gatherables.treasure[obj.entryId] && isCurrentlyClickable(obj)) {
+      } else if ((Gatherables.treasure[obj.entryId] && isCurrentlyClickable(obj))
+                 || isTreasureNameChest(obj)) {
         prefix = '[T] ';
         prefixColor = colors.silver;
       } else if (isInteractableQuestChest(obj) || obj.isLootable || isGooberQuestObjective(obj)) {
@@ -396,17 +514,146 @@ class Radar {
       canvas.addLine(mePos, closest.screenPos, objectColors.default, 2);
     }
 
-    if (Settings.ExtraRadarInteractTracked && !me.currentCastOrChannel && !me.isMoving()) {
+    // Cast ended (success or interrupt) — resolve pending immediately rather
+    // than waiting for an event the SDK may or may not surface.
+    if (this.interactPending && this.wasCasting && !me.isCasting) {
+      console.info(`[Radar] pending cleared by isCasting T→F`);
+      this.interactPending = false;
+      this.pendingCastGUID = null;
+      this.lastInteractAt = wow.frameTime;
+    }
+    this.wasCasting = me.isCasting;
+
+    // Safety timeout only applies when nothing is happening — if we're still
+    // casting, the interact obviously succeeded and the cast end will resolve.
+    if (this.interactPending && !me.isCasting
+        && wow.frameTime - this.lastInteractAt >= INTERACT_PENDING_TIMEOUT_MS) {
+      console.info(`[Radar] interact pending timeout`);
+      this.interactPending = false;
+      this.pendingCastGUID = null;
+      this.lastInteractAt = wow.frameTime;
+    }
+
+    // --- DEBUG: with "Interact Tracked" + "Draw Debug Info" both enabled, dump
+    // (once per second) the outer gate state plus every nearby goober/chest with
+    // the exact reason the interact loop would skip it. Remove once diagnosed.
+    if (Settings.ExtraRadarInteractTracked && Settings.ExtraRadarDrawDebug
+        && wow.frameTime - this._lastInteractDebugAt > 1000) {
+      this._lastInteractDebugAt = wow.frameTime;
+      console.info(`[Radar/dbg] gate casting=${me.isCasting ? 1 : 0} moving=${me.isMoving() ? 1 : 0} pending=${this.interactPending ? 1 : 0} sinceLast=${wow.frameTime - this.lastInteractAt}ms tracked=${trackedEntries.length}`);
+
+      const trackedHashes = new Set();
+      for (const e of trackedEntries) {
+        const h = e.obj?.guid?.hash;
+        if (h !== undefined) trackedHashes.add(h);
+      }
+      const hex = v => `0x${((v ?? 0) >>> 0).toString(16)}`;
+      const mp = me.position;
+      let printed = 0;
+      objMgr.objects.forEach(obj => {
+        if (printed >= 8) return;
+        if (!(obj instanceof wow.CGGameObject)) return;
+        if (obj.goType !== GameObjectType.Goober && obj.goType !== GameObjectType.Chest) return;
+        const p = obj.position;
+        if (!p) return;
+        const dx = p.x - mp.x, dy = p.y - mp.y, dz = p.z - mp.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > 15) return;
+        printed++;
+        const h = obj.guid?.hash;
+        const reason = interactSkipReason(obj);
+        console.info(`[Radar/dbg] ${obj.name} id=${obj.entryId} d=${dist.toFixed(1)} goType=${obj.goType} use=${obj.goUsable ? 1 : 0} loot=${obj.isLootable ? 1 : 0} state=${obj.goState} dynF=${hex(obj.dynamicFlags)} goF=${hex(obj.goFlags)} flags=${hex(obj.flags)} typeF=${hex(obj.typeFlags)} goFac=${obj.goFactionTemplate} inRange=${me.withinInteractRange(obj) ? 1 : 0} tracked=${h !== undefined && trackedHashes.has(h) ? 1 : 0} -> ${reason ?? "WOULD INTERACT"}`);
+      });
+    }
+
+    if (Settings.ExtraRadarInteractTracked && !me.isCasting && !me.isMoving() && !this.interactPending) {
+      const now = wow.frameTime;
       for (const entry of trackedEntries) {
         const obj = entry.obj;
         if (!(obj instanceof wow.CGGameObject)) continue;
-        if (me.withinInteractRange(obj)) {
-          obj.interact();
-          break;
-        }
+        if (!me.withinInteractRange(obj)) continue;
+        if (!isCurrentlyClickable(obj)) continue;
+        const hash = obj.guid?.hash;
+        if (hash !== undefined && hash === this.lastInteractedGuidHash
+            && now - this.lastInteractAt < SAME_GUID_GRACE_MS) continue;
+        console.info(`[Radar] interact ${obj.name} [${hash?.toString(16)}]`);
+        obj.interact();
+        this.lastInteractAt = now;
+        this.lastInteractedGuidHash = hash;
+        this.lastInteractedGuid = obj.guid;
+        this.interactPending = true;
+        break;
       }
     }
   }
 }
+
+// Resolves Radar.interactPending based on the lifecycle of the interact we sent.
+// We capture the castGUID from UNIT_SPELLCAST_START so subsequent SUCCEEDED /
+// FAILED / INTERRUPTED events are only matched to OUR cast (other player spells
+// have their own castGUID and are ignored). For chests/goobers that open loot
+// directly without a cast, LOOT_CLOSED resolves it.
+const resolvePending = (reason) => {
+  Radar.interactPending = false;
+  Radar.pendingCastGUID = null;
+  Radar.lastInteractAt = wow.frameTime;
+  console.info(`[Radar] pending cleared by ${reason}`);
+};
+
+// SDK quirks observed in the wild:
+//   - args[0] is a Guid object for the caster (NOT the "player" unit token).
+//   - castGUID (args[1]) is also a Guid — compare with .equals().
+//   - The SDK occasionally emits stale UNIT_SPELLCAST_INTERRUPTED bursts for a
+//     prior cast right after a new interact, so resolution events must be
+//     filtered by castGUID match to the START we captured.
+//   - LOOT_OPENED/LOOT_CLOSED do NOT fire for quest-objective interacts that
+//     don't produce a loot window — for those we rely on the isCasting T→F
+//     transition (handled in tick) and the FAILED/INTERRUPTED events here.
+const radarInteractListener = new wow.EventListener();
+radarInteractListener.onEvent = (event) => {
+  if (!Radar.interactPending) return;
+  if (event.name === "COMBAT_LOG_EVENT_UNFILTERED") return;
+
+  if (event.name === "LOOT_CLOSED") {
+    resolvePending("LOOT_CLOSED");
+    return;
+  }
+
+  if (!event.name?.startsWith("UNIT_SPELLCAST_")) return;
+  const [unitGuid, castGUID, spellID] = event.args ?? [];
+  if (!unitGuid?.equals || !me.guid || !unitGuid.equals(me.guid)) return;
+
+  // DEBUG: while an interact is pending, surface every player spellcast event with
+  // its spell + target, so we can learn each GO's actual "use" spell and whether
+  // it targets the object (channeled => has START; instant => SUCCEEDED, no START).
+  if (Settings.ExtraRadarDrawDebug) {
+    const tgt = me.spellInfo?.spellTargetGuid;
+    const onObj = tgt?.equals?.(Radar.lastInteractedGuid) ? 1 : 0;
+    const match = Radar.pendingCastGUID?.equals?.(castGUID) ? 1 : 0;
+    console.info(`[Radar/cast] ${event.name} id=${spellID} name="${radarSpellName(spellID)}" target=${tgt?.toString?.() ?? "n/a"} onInteractedObj=${onObj} castGUIDmatch=${match}`);
+  }
+
+  if (event.name === "UNIT_SPELLCAST_START") {
+    Radar.pendingCastGUID = castGUID;
+    console.info(`[Radar] cast START id=${spellID}`);
+    return;
+  }
+
+  // FAILED can fire before any START (server rejects the cast attempt outright),
+  // so there's no castGUID to match — trust it.
+  if (event.name === "UNIT_SPELLCAST_FAILED"
+      || event.name === "UNIT_SPELLCAST_FAILED_QUIET") {
+    resolvePending(`${event.name} id=${spellID}`);
+    return;
+  }
+
+  // INTERRUPTED / SUCCEEDED always follow a START — require castGUID match to
+  // avoid the stale-burst quirk noted above.
+  if (event.name === "UNIT_SPELLCAST_INTERRUPTED"
+      || event.name === "UNIT_SPELLCAST_SUCCEEDED") {
+    if (!Radar.pendingCastGUID?.equals?.(castGUID)) return;
+    resolvePending(`${event.name} id=${spellID}`);
+  }
+};
 
 export default Radar;

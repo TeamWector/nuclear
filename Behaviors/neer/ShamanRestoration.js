@@ -18,6 +18,15 @@ const auras = {
   riptide: 61295,
   ghostWolf: 2645,
   ascendance: 114052,
+  earthlivingWeapon: 382022,
+  astralShift: 108271,
+  skyfury: 462854,
+};
+
+// Spell-cast ids compared against the in-progress cast (currentCastOrChannel.cast).
+const spells = {
+  healingWave: 77472,
+  chainHeal: 1064,
 };
 
 export class ShamanRestorationBehavior extends Behavior {
@@ -30,8 +39,14 @@ export class ShamanRestorationBehavior extends Behavior {
     { type: "slider", uid: "NeerRestoHealingWaveThreshold", text: "Healing Wave Threshold (%)", min: 0, max: 100, default: 80 },
     { type: "slider", uid: "NeerRestoChainHealThreshold", text: "Chain Heal Threshold (%)", min: 0, max: 100, default: 75 },
     { type: "slider", uid: "NeerRestoChainHealMinTargets", text: "Chain Heal Min Injured", min: 2, max: 5, default: 3 },
+    { type: "slider", uid: "NeerRestoHealingStreamTotemHp", text: "Healing Stream Totem HP% (drop when ally below)", min: 0, max: 100, default: 90 },
     { type: "slider", uid: "NeerRestoOverhealStopPct", text: "Overheal Stop Threshold (%)", min: 50, max: 100, default: 100 },
-    { type: "slider", uid: "NeerRestoAscendanceThreshold", text: "Ascendance Threshold (%)", min: 0, max: 100, default: 40 },
+    { type: "slider", uid: "NeerRestoAscendanceThreshold", text: "Ascendance HP% (counts as injured)", min: 0, max: 100, default: 70 },
+    { type: "slider", uid: "NeerRestoAscendanceMinTargets", text: "Ascendance min injured allies", min: 1, max: 10, default: 3 },
+    { type: "slider", uid: "NeerRestoAstralShiftPct", text: "Astral Shift HP% (self defensive)", min: 0, max: 100, default: 40 },
+    { type: "slider", uid: "NeerRestoUnleashLifePct", text: "Unleash Life HP% (lowest ally)", min: 0, max: 100, default: 85 },
+    { type: "checkbox", uid: "NeerRestoEarthlivingWeapon", text: "Keep Earthliving Weapon imbue (out of combat)", default: true },
+    { type: "checkbox", uid: "NeerRestoPurge", text: "Purge enemy Magic buffs (needs Dispel Mode on)", default: false },
   ];
 
   build() {
@@ -46,6 +61,8 @@ export class ShamanRestorationBehavior extends Behavior {
         })
       ),
       spell.interrupt("Wind Shear", false),
+      // Astral Shift — off-GCD personal defensive; fire even while mid-cast.
+      spell.cast("Astral Shift", on => me, req => this.shouldAstralShift()),
       common.waitForCastOrChannel(),
 
       new bt.Decorator(
@@ -53,6 +70,14 @@ export class ShamanRestorationBehavior extends Behavior {
         new bt.Selector(
           spell.cast("Water Shield", on => me, req =>
             !me.hasAura(auras.waterShield) && !me.hasAura(auras.ghostWolf)
+          ),
+          // Earthliving Weapon — keep the healing imbue up; apply only out of combat.
+          spell.cast("Earthliving Weapon", on => me, req =>
+            (Settings.NeerRestoEarthlivingWeapon ?? true) && !me.inCombat() && !me.hasAura(auras.earthlivingWeapon)
+          ),
+          // Skyfury — keep the group buff up (caster form only).
+          spell.cast("Skyfury", on => me, req =>
+            !me.hasAura(auras.skyfury) && !me.hasAura(auras.ghostWolf)
           ),
           spell.cast("Earth Shield", on => me, req =>
             me.hasAura(auras.elementalOrbit) &&
@@ -65,17 +90,17 @@ export class ShamanRestorationBehavior extends Behavior {
           spell.cast("Ghost Wolf", on => me, req =>
             me.isMoving() && !me.inCombat() && !me.hasAura(auras.ghostWolf)
           ),
-          spell.dispel("Purify Spirit", true, DispelPriority.Low, false, WoWDispelType.Magic),
-          spell.dispel("Purify Spirit", true, DispelPriority.Low, false, WoWDispelType.Curse),
+          spell.dispel("Purify Spirit", true, DispelPriority.Low, false, WoWDispelType.Magic, WoWDispelType.Curse),
+          // Ascendance — raid-wide healing CD; press when several allies are hurt (AoE damage).
           spell.cast("Ascendance", on => me, req =>
             me.inCombat() &&
             !me.hasAura(auras.ascendance) &&
-            (this.getLowestAlly()?.effectiveHealthPercent ?? 100) <= Settings.NeerRestoAscendanceThreshold
+            this.injuredAllyCount(Settings.NeerRestoAscendanceThreshold ?? 70) >= (Settings.NeerRestoAscendanceMinTargets ?? 3)
           ),
           new bt.Sequence(
             spell.cast("Healing Stream Totem", on => me, req =>
               !this.isTotemActive("Healing Stream Totem") &&
-              this.anyAllyInjured() &&
+              (this.getLowestAlly()?.effectiveHealthPercent ?? 100) <= (Settings.NeerRestoHealingStreamTotemHp ?? 90) &&
               combat.targets.length > 0
             ),
             new bt.Action(() => {
@@ -86,14 +111,21 @@ export class ShamanRestorationBehavior extends Behavior {
               return bt.Status.Success;
             })
           ),
+          // Unleash Life — instant heal that amplifies the next heal; cast first so the buff carries.
+          spell.cast("Unleash Life", on => this.getUnleashLifeTarget(), req => this.getUnleashLifeTarget() !== null),
           spell.cast("Riptide", on => this.getRiptideTarget(), req => this.getRiptideTarget() !== null),
           spell.cast("Chain Heal", on => this.getChainHealTarget(), req => this.getChainHealTarget() !== null),
           spell.cast("Healing Wave", on => this.getHealingWaveTarget(), req => this.getHealingWaveTarget() !== null),
 
-          common.waitForTarget(),
-          common.waitForFacing(),
+          // Purge — strip a Magic buff off an enemy. Opt-in; also gated by Dispel Mode.
+          // Picks its own enemy target internally, so it sits ahead of the target gate.
+          new bt.Decorator(
+            () => Settings.NeerRestoPurge ?? false,
+            spell.dispel("Purge", false, DispelPriority.Low, false, WoWDispelType.Magic)
+          ),
+
           spell.cast("Chain Lightning", on => this.getChainLightningTarget(), req => this.getChainLightningTarget() !== null),
-          spell.cast("Lightning Bolt", on => combat.bestTarget)
+          spell.cast("Lightning Bolt", on => this.getTarget(), req => this.getTarget() !== null)
         )
       )
     );
@@ -104,6 +136,7 @@ export class ShamanRestorationBehavior extends Behavior {
   _cachedLowestAlly = undefined;
   _cachedTank = undefined;
   _cachedChainLightning = undefined;
+  _cachedTarget = undefined;
 
   _refreshCache() {
     if (this._cacheFrame === wow.frameTime) return;
@@ -112,6 +145,7 @@ export class ShamanRestorationBehavior extends Behavior {
     this._cachedLowestAlly = undefined;
     this._cachedTank = undefined;
     this._cachedChainLightning = undefined;
+    this._cachedTarget = undefined;
   }
 
   getValidAllies() {
@@ -148,6 +182,18 @@ export class ShamanRestorationBehavior extends Behavior {
     return this._cachedTank;
   }
 
+  shouldAstralShift() {
+    if (!me.inCombat()) return false;
+    if (me.hasAura(auras.astralShift)) return false;
+    return me.effectiveHealthPercent <= (Settings.NeerRestoAstralShiftPct ?? 40);
+  }
+
+  getUnleashLifeTarget() {
+    const ally = this.getLowestAlly();
+    if (!ally) return null;
+    return ally.effectiveHealthPercent <= (Settings.NeerRestoUnleashLifePct ?? 85) ? ally : null;
+  }
+
   getRiptideTarget() {
     const list = this.getValidAllies();
     return list.find(a =>
@@ -164,8 +210,25 @@ export class ShamanRestorationBehavior extends Behavior {
   getChainLightningTarget() {
     this._refreshCache();
     if (this._cachedChainLightning !== undefined) return this._cachedChainLightning;
-    this._cachedChainLightning = combat.targets.find(t => combat.getUnitsAroundUnit(t, 10).length >= 2) || null;
+    this._cachedChainLightning = combat.targets.find(t =>
+      me.isFacing(t) && me.distanceTo(t) <= 40 && combat.getUnitsAroundUnit(t, 10).length >= 2
+    ) || null;
     return this._cachedChainLightning;
+  }
+
+  // Facing, in-range (40yd) enemy for our filler nukes; prefers the combat best
+  // target, else the first reachable one. Cached per frame.
+  getTarget() {
+    this._refreshCache();
+    if (this._cachedTarget !== undefined) return this._cachedTarget;
+    const inRange = t => me.distanceTo(t) <= 40;
+    const best = combat.bestTarget;
+    if (best && me.isFacing(best) && inRange(best)) {
+      this._cachedTarget = best;
+    } else {
+      this._cachedTarget = combat.targets.find(t => me.isFacing(t) && inRange(t)) || null;
+    }
+    return this._cachedTarget;
   }
 
   isTotemActive(totemName) {
@@ -178,21 +241,23 @@ export class ShamanRestorationBehavior extends Behavior {
     return false;
   }
 
-  anyAllyInjured() {
-    const ally = this.getLowestAlly();
-    return ally !== null && ally.effectiveHealthPercent < 100;
+  injuredAllyCount(pct) {
+    return this.getValidAllies().filter(a => a.effectiveHealthPercent <= pct).length;
   }
 
+  // Cancel a hard-cast Healing Wave / Chain Heal whose target has been topped past
+  // the overheal threshold. Identify the cast by spell id (SpellInfo has no name /
+  // timeleft fields) and derive remaining time from castEnd.
   shouldStopOverheal() {
-    if (!me.isCastingOrChanneling) return false;
-    const cur = me.currentCastOrChannel;
-    if (!cur || cur.timeleft < 400) return false;
-    if (cur.name !== "Healing Wave" && cur.name !== "Chain Heal") return false;
-    const guid = cur.spellTargetGuid;
+    const info = me.currentCastOrChannel;
+    if (!info) return false;
+    if (info.cast !== spells.healingWave && info.cast !== spells.chainHeal) return false;
+    if (info.castEnd - wow.frameTime < 400) return false;
+    const guid = info.spellTargetGuid;
     if (!guid || guid.isNull) return false;
     const target = objMgr.findObject(guid);
     if (!target) return false;
-    return target.effectiveHealthPercent >= Settings.NeerRestoOverhealStopPct;
+    return target.effectiveHealthPercent >= (Settings.NeerRestoOverhealStopPct ?? 100);
   }
 
   getChainHealTarget() {
