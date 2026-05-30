@@ -10,28 +10,29 @@ import Settings from "@/Core/Settings";
 
 const auras = {
   battleShout: 6673,
-  shieldBlock: 132404,
-  ignorePain: 190456,
+  dieByTheSword: 118038,
+  suddenDeath: 52437,
 };
 
-export class WarriorProtectionBehavior extends Behavior {
-  name = "Warrior [Protection]";
+export class WarriorArmsBehavior extends Behavior {
+  name = "Warrior [Arms]";
   context = BehaviorContext.Any;
-  specialization = Specialization.Warrior.Protection;
+  specialization = Specialization.Warrior.Arms;
 
   static settings = [
     { header: "Defensives" },
-    { type: "slider", uid: "NeerProtDefWindowMs", text: "Damage window (ms)", min: 1000, max: 8000, default: 4000 },
-    { type: "slider", uid: "NeerProtShieldBlockPct", text: "Shield Block: % HP lost in window", min: 5, max: 60, default: 20 },
-    { type: "slider", uid: "NeerProtIgnorePainPct", text: "Ignore Pain: % HP lost in window", min: 5, max: 60, default: 12 },
-    { type: "slider", uid: "NeerProtIgnorePainMinRage", text: "Ignore Pain: min rage", min: 20, max: 80, default: 40 },
-    { type: "slider", uid: "NeerProtShieldBlockMinRage", text: "Shield Block: min rage", min: 15, max: 60, default: 30 },
-    { type: "slider", uid: "NeerProtPanicHpPct", text: "Panic HP% (force Shield Block/IP)", min: 10, max: 80, default: 50 },
+    { type: "slider", uid: "NeerArmsDefWindowMs", text: "Damage window (ms)", min: 1000, max: 8000, default: 4000 },
+    { type: "slider", uid: "NeerArmsDieByTheSwordPct", text: "Die by the Sword: % HP lost in window", min: 5, max: 60, default: 25 },
+    { type: "slider", uid: "NeerArmsVictoryRushHp", text: "Victory Rush HP threshold (%)", min: 20, max: 100, default: 80 },
+    { type: "slider", uid: "NeerArmsPanicHpPct", text: "Panic HP%", min: 10, max: 80, default: 35 },
+    { header: "Rotation" },
+    { type: "slider", uid: "NeerArmsAoeCount", text: "AoE: min enemies in melee", min: 2, max: 8, default: 2 },
+    { type: "slider", uid: "NeerArmsSlamMinRage", text: "Slam: min rage", min: 20, max: 100, default: 50 },
   ];
 
   constructor() {
     super();
-    this._dmgHits = [];      // [{ t, amount }]
+    this._dmgHits = [];
     this._lastHp = null;
     this._lastTick = 0;
     this._cacheFrame = -1;
@@ -80,12 +81,10 @@ export class WarriorProtectionBehavior extends Behavior {
       common.waitForNotSitting(),
       common.waitForCastOrChannel(),
       spell.interrupt("Pummel"),
-      spell.cast("Shield Block", on => me, req => this.shouldShieldBlock()),
-      spell.cast("Ignore Pain", on => me, req => this.shouldIgnorePain()),
+      spell.cast("Die by the Sword", on => me, req => this.shouldDieByTheSword()),
       new bt.Decorator(
         ret => !spell.isGlobalCooldown(),
         new bt.Selector(
-          spell.cast("Taunt", on => this.findTauntTarget()),
           new bt.Action(() => {
             const target = this.getTarget();
             if (target && me.isWithinMeleeRange(target)) {
@@ -98,16 +97,33 @@ export class WarriorProtectionBehavior extends Behavior {
           spell.cast("Charge", on => combat.bestTarget, req =>
             combat.bestTarget && !me.isWithinMeleeRange(combat.bestTarget)
           ),
-          spell.cast("Heroic Throw", on => this.heroicThrowTarget(), req => this.heroicThrowTarget() != null),
-          spell.cast("Victory Rush", on => this.getTarget()),
-          spell.cast("Thunder Clap", on => combat.bestTarget, req => combat.bestTarget && combat.bestTarget.distanceTo(me) <= 8),
-          spell.cast("Shield Slam", on => this.getTarget()),
-          spell.cast("Revenge", on => this.getTarget(), req => this.getTarget() !== null),
-          spell.cast("Execute", on => combat.targets.find(t => t.pctHealth <= 20 && me.isFacing(t) && me.isWithinMeleeRange(t)), { skipUsableCheck: true }),
-          spell.cast("Devastate", on => this.getTarget())
+          spell.cast("Heroic Throw", on => this.getTarget(30), req => {
+            const t = this.getTarget(30);
+            return t && !me.isWithinMeleeRange(t);
+          }),
+          spell.cast("Execute", on => this.getTarget(), req => me.hasAura(auras.suddenDeath) && this.getTarget() !== null, { skipUsableCheck: true }),
+          spell.cast("Victory Rush", on => this.getTarget(), req => me.pctHealth <= Settings.NeerArmsVictoryRushHp),
+          spell.cast("Sweeping Strikes", on => me, req => this.enemiesInMelee() >= Settings.NeerArmsAoeCount),
+          spell.cast("Colossus Smash", on => this.getTarget()),
+          spell.cast("Execute", on => this.getTarget(), req => {
+            const t = this.getTarget();
+            return t && t.pctHealth <= 20;
+          }),
+          spell.cast("Mortal Strike", on => this.getTarget()),
+          spell.cast("Overpower", on => this.getTarget()),
+          spell.cast("Whirlwind", on => me, req => this.enemiesInMelee() >= Settings.NeerArmsAoeCount),
+          spell.cast("Slam", on => this.getTarget(), req => me.powerByType(PowerType.Rage) >= Settings.NeerArmsSlamMinRage)
         )
       )
     );
+  }
+
+  enemiesInMelee() {
+    let count = 0;
+    for (const t of combat.targets) {
+      if (me.isWithinMeleeRange(t)) count++;
+    }
+    return count;
   }
 
   updateDamageTracker() {
@@ -122,7 +138,7 @@ export class WarriorProtectionBehavior extends Behavior {
     }
     this._lastHp = hp;
 
-    const windowMs = Settings.NeerProtDefWindowMs ?? 4000;
+    const windowMs = Settings.NeerArmsDefWindowMs ?? 4000;
     const cutoff = now - windowMs;
     while (this._dmgHits.length && this._dmgHits[0].t < cutoff) {
       this._dmgHits.shift();
@@ -137,24 +153,12 @@ export class WarriorProtectionBehavior extends Behavior {
     return (total / maxHp) * 100;
   }
 
-  shouldShieldBlock() {
+  shouldDieByTheSword() {
     if (!me.inCombat()) return false;
-
-    // At 2/2 charges with melees on us, dump one regardless — sitting capped
-    // pauses recharge, so it's strictly worse than overlapping the buff.
-    if (spell.getCharges("Shield Block") >= 2 && this.hasMeleeAttackersOnMe()) {
-      return true;
-    }
-
-    if (me.powerByType(PowerType.Rage) < (Settings.NeerProtShieldBlockMinRage ?? 30)) return false;
-
-    const sb = me.getAura(auras.shieldBlock);
-    const refreshable = !sb || sb.remaining < 2000;
-    if (!refreshable) return false;
-
+    if (me.hasAura(auras.dieByTheSword)) return false;
     const dmgPct = this.damageTakenPctInWindow();
-    const threshold = Settings.NeerProtShieldBlockPct ?? 20;
-    const panicHp = Settings.NeerProtPanicHpPct ?? 50;
+    const threshold = Settings.NeerArmsDieByTheSwordPct ?? 25;
+    const panicHp = Settings.NeerArmsPanicHpPct ?? 35;
     return dmgPct >= threshold || me.pctHealth <= panicHp;
   }
 
@@ -166,41 +170,11 @@ export class WarriorProtectionBehavior extends Behavior {
     return false;
   }
 
-  shouldIgnorePain() {
-    if (!me.inCombat()) return false;
-
-    // Rage dump above 80 with attackers on us — avoids capping while we
-    // still have an absorb's worth of value to gain.
-    if (me.powerByType(PowerType.Rage) > 80 && this.hasAttackersOnMe()) {
-      return true;
-    }
-
-    if (me.powerByType(PowerType.Rage) < (Settings.NeerProtIgnorePainMinRage ?? 40)) return false;
-
-    const dmgPct = this.damageTakenPctInWindow();
-    const threshold = Settings.NeerProtIgnorePainPct ?? 12;
-    const panicHp = Settings.NeerProtPanicHpPct ?? 50;
-    return dmgPct >= threshold || me.pctHealth <= panicHp;
-  }
-
   hasAttackersOnMe() {
     if (!me.guid) return false;
     for (const t of combat.targets) {
       if (t?.target?.equals(me.guid)) return true;
     }
     return false;
-  }
-
-  findTauntTarget() {
-    return combat.targets.find(t => t.target && !t.isTanking());
-  }
-
-  heroicThrowTarget() {
-    const main = combat.bestTarget;
-    if (main && !me.isWithinMeleeRange(main)) return main;
-    if (!spell.getCooldown("Taunt")?.ready) {
-      return combat.targets.find(t => me.isFacing(t) && t.target && !t.isTanking()) ?? null;
-    }
-    return null;
   }
 }

@@ -13,7 +13,7 @@ import General from './Extra/General';
 import PVP from './Extra/PVP';
 import ESP from './Extra/ESP';
 import ToastNotification from './Extra/ToastNotification';
-import commandListener from './Core/CommandListener';
+import './Core/CommandListener';
 import colors from './Enums/Colors';
 import KeyBinding from './Core/KeyBinding';
 
@@ -40,10 +40,8 @@ nuclear.initialize().then(() => {
     perfMgr.begin("total");
     objMgr.tick();
     nuclear.tick();
-    commandListener.tick();
     me && extraModules.forEach(module => module.tick());
     dbgWindow.tick();
-    commandListener.renderQueuedSpells();
     nuclearWindow.tick();
     perfMgr.end("total");
     perfMgr.render();

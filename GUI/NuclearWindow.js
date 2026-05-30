@@ -5,7 +5,6 @@ import Autolooter from "@/Extra/Autolooter";
 import Radar from "@/Extra/Radar";
 import General from "@/Extra/General";
 import ProfileSettings from "@/Extra/ProfileSettings";
-import SpellQueueDisplay from "@/Extra/SpellQueueDisplay";
 import PVP from "@/Extra/PVP";
 import ESP from "@/Extra/ESP";
 import ToastNotification from "@/Extra/ToastNotification";
@@ -16,7 +15,7 @@ import KeyBinding from "@/Core/KeyBinding";
 class NuclearWindow {
   constructor() {
     this.show = new imgui.MutableVariable(false);
-    this.modules = [General, SpellQueueDisplay, Radar, Autolooter, AntiAFK, ProfileSettings, PVP, ESP, ToastNotification];
+    this.modules = [General, Radar, Autolooter, AntiAFK, ProfileSettings, PVP, ESP, ToastNotification];
     this.initialized = false;
     // Initialize state for each option from Settings
     this.state = {};
